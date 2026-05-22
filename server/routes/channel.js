@@ -5,6 +5,7 @@ const path = require('path')
 const os   = require('os')
 const accountManager = require('../accountManager')
 const { isQuotaError, sendError } = require('../apiError')
+const innertube = require('../lib/innertube')
 
 const router  = express.Router()
 const CACHE_FILE = path.join(os.tmpdir(), 'channel_info.json')
@@ -59,11 +60,35 @@ router.get('/', async (req, res) => {
     saveDisk(result)
     res.json(result)
   } catch (err) {
-    // On quota/error: try memory, then disk
-    if (isQuotaError(err)) {
-      const cached = _mem?.data || loadDisk()
+    // On quota/auth error: try memory, then Innertube (quota-free), then disk
+    const cached = _mem?.data || loadDisk()
+
+    if (isQuotaError(err) || err?.code === 'UNAUTHENTICATED') {
+      // Try Innertube for public data if we have a channelId
+      const channelId = cached?.id
+      if (channelId) {
+        try {
+          const pub = await innertube.channelInfo(channelId)
+          if (pub?.name) {
+            const merged = {
+              ...(cached || {}),
+              name:        pub.name,
+              handle:      pub.handle || cached?.handle || '',
+              subscribers: pub.subscribers || cached?.subscribers || 0,
+              thumbnail:   pub.thumbnail  || cached?.thumbnail  || '',
+              _innertube:  true,
+            }
+            _mem = { data: merged, _ts: Date.now() }
+            saveDisk(merged)
+            return res.json(merged)
+          }
+        } catch (itErr) {
+          console.warn('[channel] Innertube fallback failed:', itErr.message)
+        }
+      }
       if (cached) return res.json({ ...cached, _cached: true })
     }
+
     sendError(res, err, 'channel route')
   }
 })

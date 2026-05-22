@@ -28,7 +28,7 @@ function apiToLocal(v: ApiVideo): Video {
 
 // ─── Channel banner ───────────────────────────────────────────────────────────
 function ChannelBanner({ info }: { info: ChannelInfo }) {
-  const seeded = info._seeded
+  const seeded = info._seeded && !info._innertube
   return (
     <div style={{ display: 'flex', gap: '20px', alignItems: 'center', flexWrap: 'wrap' }}>
       <pre style={{ margin: 0, fontSize: '11px', color: 'var(--text-dim)', lineHeight: '1.7' }}>{

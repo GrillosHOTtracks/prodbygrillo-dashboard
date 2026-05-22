@@ -17,6 +17,7 @@ export type ChannelInfo = {
   thumbnail: string; country: string; publishedAt: string
   subscribers: number; totalViews: number; totalVideos: number
   _seeded?: boolean
+  _innertube?: boolean
 } & Cacheable
 export type DailyRow = {
   date: string; views: number; watchTime: number

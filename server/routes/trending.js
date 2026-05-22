@@ -1,10 +1,8 @@
 const express = require('express')
-const { google } = require('googleapis')
 const fs   = require('fs')
 const path = require('path')
 const os   = require('os')
-const accountManager = require('../accountManager')
-const { isQuotaError, sendError } = require('../apiError')
+const { search } = require('../lib/innertube')
 
 const router = express.Router()
 const CACHE_FILE = path.join(os.tmpdir(), 'trending_cache.json')
@@ -60,64 +58,43 @@ router.get('/', async (req, res) => {
   }
 
   try {
-    const result = await accountManager.withPublicYouTube(async (auth) => {
-      const youtube = google.youtube({ version: 'v3', auth })
+    const now   = new Date()
+    const year  = now.getUTCFullYear()
+    const month = now.toLocaleString('en', { month: 'long' })
 
-      const now  = new Date()
-      const year = now.getUTCFullYear()
-      // Format without milliseconds — some API versions reject .000Z
-      const publishedAfter = `${year}-${String(now.getUTCMonth() + 1).padStart(2, '0')}-01T00:00:00Z`
+    // Three queries via Innertube — zero quota cost
+    const queries = [
+      `type beat ${year}`,
+      `free type beat ${year}`,
+      `${month.toLowerCase()} type beat ${year}`,
+    ]
 
-      const queries = [`type beat ${year}`, `free type beat ${year}`, `trap type beat ${year}`]
+    const results = await Promise.all(queries.map(q => search(q).catch(() => [])))
 
-      const searches = await Promise.all(
-        queries.map(q =>
-          youtube.search.list({
-            part: ['id', 'snippet'], q, type: ['video'],
-            publishedAfter, maxResults: 50,
-          }).catch(err => {
-            if (isQuotaError(err)) throw err
-            return { data: { items: [] } }
-          })
-        )
-      )
-
-      // Deduplicate by video ID
-      const seen = new Set()
-      const items = []
-      for (const s of searches) {
-        for (const item of s.data.items || []) {
-          const id = item.id?.videoId
-          if (id && !seen.has(id)) { seen.add(id); items.push(item) }
-        }
+    // Deduplicate by video ID
+    const seen  = new Set()
+    const items = []
+    for (const videos of results) {
+      for (const v of videos) {
+        if (!seen.has(v.videoId)) { seen.add(v.videoId); items.push(v) }
       }
-      if (!items.length) return []
+    }
 
-      // Fetch view counts (1 quota unit)
-      const statsRes = await youtube.videos.list({ part: ['statistics'], id: items.map(i => i.id.videoId) })
-      const statsMap = {}
-      for (const v of statsRes.data.items || []) statsMap[v.id] = v.statistics
+    // Aggregate by artist
+    const artistMap = {}
+    for (const item of items) {
+      const artist = extractArtist(decodeHtml(item.title))
+      if (!artist) continue
+      const key = artistKey(artist)
+      if (!artistMap[key]) artistMap[key] = { name: artist, beatCount: 0, totalViews: 0, latestBeat: '' }
+      artistMap[key].beatCount++
+      artistMap[key].totalViews += item.views
+    }
 
-      // Aggregate by artist
-      const artistMap = {}
-      for (const item of items) {
-        const id     = item.id.videoId
-        const artist = extractArtist(decodeHtml(item.snippet.title))
-        if (!artist) continue
-        const views       = parseInt(statsMap[id]?.viewCount || '0')
-        const publishedAt = item.snippet.publishedAt || ''
-        const key         = artistKey(artist)
-        if (!artistMap[key]) artistMap[key] = { name: artist, beatCount: 0, totalViews: 0, latestBeat: publishedAt }
-        artistMap[key].beatCount++
-        artistMap[key].totalViews += views
-        if (publishedAt > artistMap[key].latestBeat) artistMap[key].latestBeat = publishedAt
-      }
-
-      return Object.values(artistMap)
-        .filter(a => a.beatCount >= 1)
-        .sort((a, b) => b.totalViews - a.totalViews)
-        .slice(0, 10)
-    })
+    const result = Object.values(artistMap)
+      .filter(a => a.beatCount >= 1)
+      .sort((a, b) => b.totalViews - a.totalViews)
+      .slice(0, 10)
 
     _cache   = result
     _cacheTs = Date.now()
@@ -126,7 +103,8 @@ router.get('/', async (req, res) => {
   } catch (err) {
     const cached = _cache || loadDisk()
     if (cached) { _cache = cached; _cacheTs = Date.now(); return res.json(cached) }
-    sendError(res, err, 'trending route')
+    console.error('[trending]', err.message)
+    res.status(500).json({ error: 'Trending unavailable', details: err.message })
   }
 })
 
