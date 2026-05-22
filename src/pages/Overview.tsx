@@ -289,7 +289,7 @@ export function Overview({
 
       {/* ── AI ANALYST ──────────────────────────────────────── */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-        <SectionLabel>AI ANALYST · CHAT COM OS DADOS ────────────────────────────</SectionLabel>
+        <SectionLabel>AI ANALYST · CHAT COM OS DADOS (llama-3.3-70b) ─────────────</SectionLabel>
         <AIChat
           analytics={data.length ? data : null}
           channelInfo={realChannel ?? null}

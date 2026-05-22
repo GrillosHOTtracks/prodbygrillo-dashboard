@@ -166,7 +166,7 @@ export function AIChat({ analytics, channelInfo, videos, traffic }: {
       {/* ── Header ── */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
         <p style={{ color: '#00ff00', fontSize: '11px', letterSpacing: '1px', margin: 0 }}>
-          ┌─ AI ANALYST · GEMINI 2.0 FLASH
+          ┌─ AI ANALYST · LLAMA 3.3 70B
         </p>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
           {!hasData && (
