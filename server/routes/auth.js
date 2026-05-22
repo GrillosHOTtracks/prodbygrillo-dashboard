@@ -1,6 +1,21 @@
 const express = require('express')
-const fs = require('fs')
+const fs   = require('fs')
+const path = require('path')
+const os   = require('os')
 const accountManager = require('../accountManager')
+
+const CACHE_FILES = [
+  path.join(os.tmpdir(), 'channel_info.json'),
+  path.join(os.tmpdir(), 'videos_cache.json'),
+  path.join(os.tmpdir(), 'trending_cache.json'),
+]
+
+function clearAllCaches() {
+  for (const f of CACHE_FILES) {
+    try { if (fs.existsSync(f)) fs.unlinkSync(f) } catch {}
+  }
+  console.log('[AUTH] All data caches cleared for new login')
+}
 
 const router = express.Router()
 let pendingFrontendOrigin = 'http://localhost:5173'
@@ -28,6 +43,7 @@ router.get('/callback', async (req, res) => {
   if (!code) return res.status(400).json({ error: 'No code provided' })
   try {
     await accountManager.exchangeCode(code)
+    clearAllCaches()
     res.redirect(`${base}?auth=success`)
   } catch (err) {
     console.error('Token exchange failed:', err.message)
@@ -37,6 +53,7 @@ router.get('/callback', async (req, res) => {
 
 router.post('/logout', (_req, res) => {
   accountManager.logout()
+  clearAllCaches()
   res.json({ ok: true })
 })
 

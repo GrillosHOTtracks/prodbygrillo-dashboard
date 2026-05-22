@@ -70,7 +70,8 @@ app.get('/api/health', (_req, res) => {
   res.json({ ok: true, authenticated: accountManager.isAuthenticated(), ts: new Date().toISOString() })
 })
 
-// Seed channel cache from env vars (avoids OAuth Data API call on cold start)
+// Seed uploadsPlaylist from CHANNEL_ID env var — only if no real cache exists yet
+// This avoids the OAuth channels.list call on cold start (saves 1 quota unit)
 {
   const os   = require('os')
   const cid  = process.env.CHANNEL_ID
@@ -80,26 +81,17 @@ app.get('/api/health', (_req, res) => {
     const existing  = fs.existsSync(cacheFile)
       ? (() => { try { return JSON.parse(fs.readFileSync(cacheFile, 'utf8')) } catch { return null } })()
       : null
-    // Only seed if no real data cached yet
-    if (!existing || existing._seeded) {
-      let seed
-      try {
-        // CHANNEL_SEED env var can contain full JSON (set it via Railway after first successful fetch)
-        seed = process.env.CHANNEL_SEED ? JSON.parse(process.env.CHANNEL_SEED) : null
-      } catch {}
-      seed = seed || {
+    // Only seed if no cache at all — never overwrite real API data
+    if (!existing) {
+      const seed = {
         id: cid,
         uploadsPlaylist: upid || ('UU' + cid.slice(2)),
-        name: process.env.CHANNEL_NAME || '',
-        handle: process.env.CHANNEL_HANDLE || '',
-        description: '', thumbnail: '',
+        name: '', handle: '', description: '', thumbnail: '',
         country: 'BR', publishedAt: '',
-        subscribers: parseInt(process.env.CHANNEL_SUBS || '0'),
-        totalViews: parseInt(process.env.CHANNEL_VIEWS || '0'),
-        totalVideos: parseInt(process.env.CHANNEL_VIDEOS || '0'),
+        subscribers: 0, totalViews: 0, totalVideos: 0,
         _seeded: true,
       }
-      try { fs.writeFileSync(cacheFile, JSON.stringify(seed)); console.log('[SERVER] Channel cache seeded from env') } catch {}
+      try { fs.writeFileSync(cacheFile, JSON.stringify(seed)); console.log('[SERVER] Channel cache seeded from CHANNEL_ID env') } catch {}
     }
   }
 }
