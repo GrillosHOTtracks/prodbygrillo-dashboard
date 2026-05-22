@@ -10,9 +10,14 @@ router.get('/status', (_req, res) => {
 
 router.get('/url', (req, res) => {
   if (req.query.origin) pendingFrontendOrigin = req.query.origin
-  const url = accountManager.getAuthUrl()
-  if (!url) return res.status(400).json({ error: 'No OAuth credentials found (client_secret_1.json missing)' })
-  res.json({ url })
+  try {
+    const url = accountManager.getAuthUrl()
+    if (!url) return res.status(400).json({ error: 'No OAuth credentials found' })
+    res.json({ url })
+  } catch (err) {
+    console.error('[AUTH URL ERROR]', err.stack || err.message)
+    res.status(500).json({ error: err.message })
+  }
 })
 
 router.get('/callback', async (req, res) => {
