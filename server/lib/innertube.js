@@ -101,4 +101,44 @@ async function channelInfo(channelId) {
   return extractChannel(data)
 }
 
-module.exports = { search, channelInfo }
+/**
+ * Fetch last 15 videos from YouTube RSS feed — zero quota, no API key.
+ * Returns array compatible with videos route format.
+ */
+async function channelFeed(channelId) {
+  const res = await fetch(`https://www.youtube.com/feeds/videos.xml?channel_id=${channelId}`, {
+    headers: { 'User-Agent': 'Mozilla/5.0' },
+  })
+  if (!res.ok) throw new Error(`RSS feed ${res.status}`)
+  const xml = await res.text()
+
+  function tag(entry, name) {
+    const m = entry.match(new RegExp(`<${name}[^>]*>([\\s\\S]*?)<\\/${name}>`))
+    return m ? m[1].trim() : ''
+  }
+  function attr(entry, name, attrName) {
+    const m = entry.match(new RegExp(`<${name}[^>]*${attrName}="([^"]*)"[^>]*>`))
+    return m ? m[1] : ''
+  }
+  function decHtml(s) {
+    return s.replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&#(\d+);/g,(_,c)=>String.fromCharCode(c))
+  }
+
+  const entries = xml.match(/<entry>([\s\S]*?)<\/entry>/g) ?? []
+  return entries.map(e => {
+    const videoId = tag(e, 'yt:videoId')
+    const views   = parseInt(attr(e, 'yt:statistics', 'views') || '0')
+    const thumb   = attr(e, 'media:thumbnail', 'url') || attr(e, 'media:content', 'url')
+    return {
+      id:          videoId,
+      title:       decHtml(tag(e, 'title')),
+      thumbnail:   thumb,
+      publishedAt: tag(e, 'published').split('T')[0],
+      views,
+      likes: 0, comments: 0, watchTime: 0,
+      ctr: 0, avgDuration: '', revenue: 0, status: 'published',
+    }
+  }).filter(v => v.id)
+}
+
+module.exports = { search, channelInfo, channelFeed }

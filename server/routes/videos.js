@@ -5,6 +5,7 @@ const path = require('path')
 const os   = require('os')
 const accountManager = require('../accountManager')
 const { isQuotaError, sendError } = require('../apiError')
+const { channelFeed } = require('../lib/innertube')
 
 const router = express.Router()
 
@@ -156,7 +157,49 @@ router.get('/', async (req, res) => {
     saveDisk(VIDEOS_CACHE_FILE, result)
     res.json({ data: result })
   } catch (err) {
-    // On any error: serve disk cache if available
+    // Quota exceeded → try RSS feed (zero quota, last 15 videos)
+    if (isQuotaError(err) && channelId) {
+      try {
+        console.log('[videos] quota exceeded, trying RSS fallback')
+        const rssVideos = await channelFeed(channelId)
+        if (rssVideos.length) {
+          // Try to enrich with Analytics (separate quota — usually still available)
+          try {
+            const ya = google.youtubeAnalytics({ version: 'v2', auth: accountManager.getAuthClient() })
+            const videoIds = rssVideos.map(v => v.id)
+            const r = await ya.reports.query({
+              ids: 'channel==MINE',
+              startDate: '2020-01-01',
+              endDate: new Date().toISOString().split('T')[0],
+              dimensions: 'video',
+              filters: `video==${videoIds.join(',')}`,
+              metrics: 'views,estimatedMinutesWatched,averageViewPercentage',
+              maxResults: videoIds.length,
+            })
+            const aMap = {}
+            for (const row of r.data.rows || []) {
+              aMap[row[0]] = { views: row[1], watchTime: row[2], ctr: parseFloat((row[3] || 0).toFixed(1)) }
+            }
+            for (const v of rssVideos) {
+              if (aMap[v.id]) {
+                v.views     = aMap[v.id].views || v.views
+                v.watchTime = Math.round(aMap[v.id].watchTime)
+                v.ctr       = aMap[v.id].ctr
+              }
+            }
+          } catch { /* analytics optional */ }
+
+          const sorted = rssVideos.sort((a, b) => b.views - a.views)
+          _cache = { data: sorted, _ts: Date.now() }
+          saveDisk(VIDEOS_CACHE_FILE, sorted)
+          return res.json({ data: sorted, _rss: true })
+        }
+      } catch (rssErr) {
+        console.warn('[videos] RSS fallback failed:', rssErr.message)
+      }
+    }
+
+    // Last resort: disk cache
     const diskData = _cache?.data || loadDisk(VIDEOS_CACHE_FILE)
     if (diskData) return res.json({ data: diskData, _cached: true })
     sendError(res, err, 'videos route')
