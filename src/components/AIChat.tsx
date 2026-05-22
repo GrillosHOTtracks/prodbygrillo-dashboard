@@ -166,7 +166,7 @@ export function AIChat({ analytics, channelInfo, videos, traffic }: {
       {/* ── Header ── */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
         <p style={{ color: '#00ff00', fontSize: '11px', letterSpacing: '1px', margin: 0 }}>
-          ┌─ AI ANALYST · LLAMA 3.3 70B
+          ┌─ LAIS · ANALISTA DO CANAL
         </p>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
           {!hasData && (
@@ -226,7 +226,7 @@ export function AIChat({ analytics, channelInfo, videos, traffic }: {
           {messages.map((msg, i) => (
             <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
               <span style={{ color: msg.role === 'user' ? '#444444' : '#00aa00', fontSize: '10px', letterSpacing: '1px' }}>
-                {msg.role === 'user' ? '> TU' : '> GEMINI'}
+                {msg.role === 'user' ? '> TU' : '> LAIS'}
               </span>
               <p style={{
                 color:       msg.role === 'user' ? '#606060' : '#c0c0c0',
@@ -242,7 +242,7 @@ export function AIChat({ analytics, channelInfo, videos, traffic }: {
           {loading && streamText && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
               <span style={{ color: '#00aa00', fontSize: '10px', letterSpacing: '1px' }}>
-                {'> GEMINI'}
+                {'> LAIS'}
               </span>
               <p style={{
                 color: '#c0c0c0', fontSize: '12px', margin: 0, lineHeight: '1.75',
