@@ -1,8 +1,9 @@
 import { analyze as beatDetectorAnalyze } from 'web-audio-beat-detector'
 
-// ─── Krumhansl-Schmuckler key profiles (rooted at C) ─────────────────────────
-const KS_MAJOR = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88]
-const KS_MINOR = [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17]
+// ─── Bellman-Budge key profiles (rooted at C) — higher contrast than KS ──────
+// Ratio tonic:weakest ≈ 33:1 vs 2.85:1 in KS → far less major/minor confusion
+const KS_MAJOR = [16.80, 0.86, 12.95, 1.41, 13.49, 11.93, 1.25, 20.28, 1.80, 8.04, 0.62, 10.57]
+const KS_MINOR = [18.16, 0.69, 12.99, 13.34, 1.07, 11.15, 1.38, 21.07, 7.49, 1.53, 0.92, 10.21]
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
 
 // ─── Pearson correlation ──────────────────────────────────────────────────────
@@ -54,8 +55,8 @@ function computeChromagram(mono: Float32Array, sampleRate: number): number[] {
   const FFT_SIZE = 4096
   const HOP      = 2048
   const chroma   = new Array(12).fill(0)
-  // Analyse at most the first 60 s to keep computation under ~200 ms
-  const limit = Math.min(mono.length, 60 * sampleRate)
+  // Analyse at most the first 90 s — more data → better statistics
+  const limit = Math.min(mono.length, 90 * sampleRate)
   let frames = 0
 
   const re = new Float32Array(FFT_SIZE)
@@ -70,13 +71,17 @@ function computeChromagram(mono: Float32Array, sampleRate: number): number[] {
     }
     fft(re, im)
 
-    // Accumulate energy per pitch class
+    // Accumulate energy per pitch class with bass-emphasis weighting.
+    // Range 65 Hz (C2) – 2100 Hz (C7): captures bass/808 and melody,
+    // excludes sub-bass rumble (<65 Hz) and hi-hat/cymbal noise (>2100 Hz).
     for (let bin = 1; bin < FFT_SIZE >> 1; bin++) {
       const freq = (bin * sampleRate) / FFT_SIZE
-      if (freq < 27.5 || freq > 4200) continue   // A0 → ~C8
+      if (freq < 65 || freq > 2100) continue
       const midi = 12 * Math.log2(freq / 440) + 69
       const pc   = ((Math.round(midi) % 12) + 12) % 12
-      chroma[pc] += re[bin] * re[bin] + im[bin] * im[bin]
+      // Weight bass 4×, low-mid 2× — 808/bass establishes the key
+      const w = freq < 300 ? 4 : freq < 700 ? 2 : 1
+      chroma[pc] += (re[bin] * re[bin] + im[bin] * im[bin]) * w
     }
   }
 
