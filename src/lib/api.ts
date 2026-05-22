@@ -34,11 +34,28 @@ export type Video = {
   ctr: number; avgDuration: string; revenue: number; status: string
 }
 export type VideosResponse = { data: Video[] } & Cacheable
+export type BeatIdea = {
+  bpm:      string
+  keys:     string[]
+  elements: string[]
+}
+
 export type ArtistTrend = {
-  name: string
-  beatCount: number
-  totalViews: number
-  latestBeat: string
+  name:             string
+  beatCount:        number
+  totalViews:       number
+  avgViews:         number
+  latestBeat:       string
+  // Enriched fields
+  photo?:           string | null
+  deezerFans?:      number
+  deezerLink?:      string | null
+  vibes?:           string[]
+  demandScore?:     number
+  saturation?:      'low' | 'medium' | 'high'
+  opportunityScore?:number
+  hotTag?:          string | null
+  beatIdea?:        BeatIdea
 }
 
 export type OAuthStatus = {
