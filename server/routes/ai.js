@@ -2,6 +2,7 @@ require('dotenv').config()
 const express = require('express')
 const Groq = require('groq-sdk')
 const { GoogleGenerativeAI } = require('@google/generative-ai')
+const { jsonrepair } = require('jsonrepair')
 
 const router = express.Router()
 
@@ -312,10 +313,9 @@ router.post('/analyze-beat', async (req, res) => {
       clean = clean.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim()
     }
 
-    // Fix bare control chars inside string values
-    clean = sanitizeJsonStrings(clean)
-
-    // Validate
+    // Repair malformed JSON from the model (unescaped quotes, missing commas,
+    // bare newlines in strings, etc.) then validate the result
+    try { JSON.parse(clean) } catch { clean = jsonrepair(clean) }
     JSON.parse(clean)
 
     // Re-stream in chunks so the frontend terminal shows the build-up effect
