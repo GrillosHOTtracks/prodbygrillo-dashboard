@@ -134,29 +134,43 @@ router.post('/publish', upload.single('audio'), async (req, res) => {
     //   email:    #oath-email
     //   password: #userPassword
 
-    // Fill email
+    // Fill email — keyboard.type() so AngularJS $watch fires
     await page.waitForSelector('#oath-email', { timeout: 10000 })
     await page.click('#oath-email', { clickCount: 3 })
     await page.keyboard.type(email, { delay: 40 })
     await new Promise(r => setTimeout(r, 500))
 
-    // Submit email step
-    await page.keyboard.press('Enter')
+    // Click the Continue button (Enter alone doesn't advance the email step)
+    await page.evaluate(() => {
+      const btn = document.querySelector('button[type="submit"]') ||
+                  Array.from(document.querySelectorAll('button')).find(b =>
+                    /continue|next|login|sign\s*in|entrar/i.test(b.textContent || '')
+                  )
+      if (btn) btn.click()
+    })
+    await new Promise(r => setTimeout(r, 1000))
 
-    // Wait for password field
+    // Wait for password field (confirmed ID from live logs: #userPassword)
     await page.waitForSelector('#userPassword', { timeout: 15000 })
     await dumpInputs('after email submit')
     await new Promise(r => setTimeout(r, 500))
 
-    // Fill password with real keystrokes
+    // Fill password with real keystrokes so AngularJS $watch updates the model
     await page.click('#userPassword', { clickCount: 3 })
     await page.keyboard.type(password, { delay: 40 })
-    await new Promise(r => setTimeout(r, 300))
+    await new Promise(r => setTimeout(r, 400))
 
-    // Submit password step
+    // Submit
     await Promise.all([
       page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {}),
-      page.keyboard.press('Enter'),
+      page.evaluate(() => {
+        const btn = document.querySelector('button[type="submit"]') ||
+                    Array.from(document.querySelectorAll('button')).find(b =>
+                      /login|sign\s*in|entrar|continue/i.test(b.textContent || '')
+                    )
+        if (btn) btn.click()
+        else document.querySelector('#userPassword')?.closest('form')?.submit()
+      }),
     ])
 
     await new Promise(r => setTimeout(r, 2500))
