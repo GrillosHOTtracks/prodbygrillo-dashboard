@@ -71,13 +71,16 @@ app.get('/api/health', (_req, res) => {
 })
 
 // Serve built frontend in production
-const distPath = path.join(__dirname, '..', 'dist')
+const distPath = path.join(process.cwd(), 'dist')
+console.log('[SERVER] cwd:', process.cwd())
+console.log('[SERVER] distPath:', distPath)
+console.log('[SERVER] dist exists:', fs.existsSync(distPath))
 if (fs.existsSync(distPath)) {
-  console.log('[SERVER] Serving static frontend from', distPath)
-  app.use(express.static(distPath))
-  app.get('*path', (_req, res) => res.sendFile(path.join(distPath, 'index.html')))
+  console.log('[SERVER] dist contents:', fs.readdirSync(distPath))
+  app.use(express.static(distPath, { index: 'index.html' }))
+  app.use((_req, res) => res.sendFile(path.join(distPath, 'index.html')))
 } else {
-  console.log('[SERVER] No dist/ folder found — API-only mode')
+  console.log('[SERVER] No dist/ folder — API-only mode')
 }
 
 const server = app.listen(PORT, '0.0.0.0', () => {
