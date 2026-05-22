@@ -57,6 +57,17 @@ router.post('/logout', (_req, res) => {
   res.json({ ok: true })
 })
 
+// POST /api/auth/pin — valida PIN de acesso ao dashboard
+router.post('/pin', (req, res) => {
+  const pin = process.env.DASHBOARD_PIN
+  if (!pin) return res.json({ ok: true }) // sem PIN configurado → acesso livre
+  const { pin: submitted } = req.body
+  if (!submitted || submitted !== pin) {
+    return res.status(401).json({ error: 'PIN incorreto' })
+  }
+  res.json({ ok: true })
+})
+
 // Returns current token as base64 — copy this into GOOGLE_TOKEN Railway env var
 router.get('/token-export', (_req, res) => {
   try {

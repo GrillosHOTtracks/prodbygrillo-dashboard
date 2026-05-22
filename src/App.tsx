@@ -12,6 +12,90 @@ import { api } from './lib/api'
 import type { Page, DateRange } from './types'
 import type { DailyRow, ChannelInfo, Video as ApiVideo, AudienceResponse, ArtistTrend, TrafficSource, MonthlyRevenue } from './lib/api'
 
+// ─── PIN overlay ─────────────────────────────────────────────────────────────
+function PinOverlay({ onUnlock }: { onUnlock: () => void }) {
+  const [pin,     setPin]     = useState('')
+  const [error,   setError]   = useState('')
+  const [loading, setLoading] = useState(false)
+
+  async function submit() {
+    if (!pin.trim() || loading) return
+    setLoading(true)
+    setError('')
+    try {
+      const res = await fetch('/api/auth/pin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin: pin.trim() }),
+      })
+      if (res.ok) {
+        sessionStorage.setItem('pinOk', '1')
+        onUnlock()
+      } else {
+        setError('PIN incorreto')
+        setPin('')
+      }
+    } catch {
+      setError('Erro ao validar — servidor offline?')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, backgroundColor: 'var(--bg)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      zIndex: 200, fontFamily: 'Courier New, monospace',
+    }}>
+      <div style={{
+        backgroundColor: 'var(--bg-card)', border: '1px solid var(--border)',
+        boxShadow: 'var(--glow-sm)', padding: '32px 40px',
+        maxWidth: '360px', width: '90%', textAlign: 'center',
+      }}>
+        <p style={{ color: '#00ff00', fontSize: '11px', letterSpacing: '2px', margin: '0 0 24px' }}>
+          ┌─ PRODBYGRILLO · DASHBOARD ─────────────
+        </p>
+        <p style={{ color: '#555555', fontSize: '11px', letterSpacing: '1px', margin: '0 0 16px' }}>
+          INSERE O PIN DE ACESSO
+        </p>
+        <input
+          type="password"
+          value={pin}
+          onChange={e => setPin(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && submit()}
+          placeholder="••••••"
+          autoFocus
+          style={{
+            width: '100%', backgroundColor: '#111111',
+            border: '1px solid #333333', borderBottom: '2px solid #00ff00',
+            color: '#c0c0c0', fontSize: '18px', padding: '10px',
+            fontFamily: 'Courier New, monospace', outline: 'none',
+            textAlign: 'center', letterSpacing: '6px', boxSizing: 'border-box',
+          }}
+        />
+        {error && (
+          <p style={{ color: '#ff4400', fontSize: '10px', margin: '8px 0 0', letterSpacing: '1px' }}>
+            ⚠ {error}
+          </p>
+        )}
+        <button
+          onClick={submit}
+          disabled={!pin.trim() || loading}
+          style={{
+            width: '100%', marginTop: '16px', padding: '10px',
+            backgroundColor: pin.trim() && !loading ? '#00ff00' : '#001a00',
+            color: pin.trim() && !loading ? '#000000' : '#004400',
+            border: 'none', cursor: pin.trim() && !loading ? 'pointer' : 'not-allowed',
+            fontFamily: 'Courier New, monospace', fontSize: '12px',
+            fontWeight: 'bold', letterSpacing: '2px',
+          }}
+        >{loading ? '[ VERIFICANDO... ]' : '[ ENTRAR ]'}</button>
+      </div>
+    </div>
+  )
+}
+
 // ─── Auth overlay ──────────────────────────────────────────────────────────────
 function AuthOverlay({ serverDown = false }: { serverDown?: boolean }) {
   const [loading, setLoading] = useState(false)
@@ -108,6 +192,8 @@ function LoadingBar({ label }: { label: string }) {
 
 // ─── App ───────────────────────────────────────────────────────────────────────
 export default function App() {
+  const [pinOk, setPinOk] = useState(() => sessionStorage.getItem('pinOk') === '1')
+
   const [page, setPage]                         = useState<Page>('overview')
   const [dateRange, setDateRange]               = useState<DateRange>('28d')
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
@@ -204,6 +290,8 @@ export default function App() {
   }, [authenticated, dateRange])
 
   const metricsData = analyticsData ?? []
+
+  if (!pinOk) return <PinOverlay onUnlock={() => setPinOk(true)} />
 
   if (!authChecked) return <LoadingBar label="> CONNECTING TO SERVER..." />
   if (serverDown)   return <AuthOverlay serverDown />
