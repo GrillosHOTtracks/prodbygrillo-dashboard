@@ -105,13 +105,25 @@ function sanitizeJsonStrings(raw) {
       continue
     }
 
-    if (ch === '"') { result += ch; inString = false; i++; continue }
+    if (ch === '"') {
+      // Peek past whitespace: a real closing quote is followed by , } ] : or EOF.
+      // Anything else is a stray inner quote — the model forgot to escape it.
+      let j = i + 1
+      while (j < raw.length && (raw[j] === ' ' || raw[j] === '\t' || raw[j] === '\r' || raw[j] === '\n')) j++
+      const after = raw[j]
+      if (after === ',' || after === '}' || after === ']' || after === ':' || after === undefined) {
+        result += ch; inString = false; i++  // real closing quote
+      } else {
+        result += '\\"'; i++                  // stray inner quote — escape it
+      }
+      continue
+    }
 
     // Bare control characters — must be escaped inside JSON strings
     if (ch === '\n') { result += '\\n'; i++; continue }
     if (ch === '\r') { result += '\\r'; i++; continue }
     if (ch === '\t') { result += '\\t'; i++; continue }
-    if (ch.charCodeAt(0) < 0x20) { i++; continue }  // strip other controls
+    if (ch.charCodeAt(0) < 0x20) { i++; continue }
 
     result += ch
     i++
@@ -158,7 +170,7 @@ Context: it is ${month} ${year}. You have deep knowledge of:
 
 CRITICAL — The "description" field MUST use EXACTLY this template. Fill in only the bracketed placeholders; copy everything else character-for-character including all emojis, dashes, and symbols:
 
-🦗 [TOP 2-3 ARTISTS FROM matchingArtists, e.g. "Lil Baby x Rod Wave"] Type Beat - "[BEAT_NAME]" prodbygrillo
+🦗 [TOP 2-3 ARTISTS FROM matchingArtists, e.g. Lil Baby x Rod Wave] Type Beat - [BEAT_NAME] prodbygrillo
 
 💰 BUY (Untagged): https://www.beatstars.com/prodbygrillo
 
@@ -173,7 +185,7 @@ CRITICAL — The "description" field MUST use EXACTLY this template. Fill in onl
 🚫 TERMS OF USE 🚫
 ━━━━━━━━━━━━━━━━━━━
 ✅ FREE for non-profit use only
-✅ MUST credit: "prodbygrillo" in the title
+✅ MUST credit prodbygrillo in the title
 ✅ MUST tag @prodbygrillo on social media
 ❌ NO monetization without purchasing a lease
 ❌ NO distribution to Spotify/Apple Music without lease
@@ -188,7 +200,7 @@ CRITICAL — The "description" field MUST use EXACTLY this template. Fill in onl
 
 [ALL HASHTAGS FROM hashtags ARRAY JOINED WITH SPACES]
 
-The description value in JSON must be a single string with \\n for every line break. Keep all emojis, ━ symbols, ✅ ❌ exactly as shown above.
+The description value in JSON must be a single string with \\n for every line break. Keep all emojis, ━ symbols, ✅ ❌ exactly as shown above. NEVER use double-quote characters (") inside the description string — they break JSON. Use single quotes (') if quoting is needed.
 
 Return ONLY valid JSON, no markdown, no extra text. Use this exact structure:
 
