@@ -166,19 +166,25 @@ export default function App() {
   // Fetch channel info once authenticated
   useEffect(() => {
     if (!authenticated) return
-    api.channel().then(setChannelInfo).catch(() => {})
+    api.channel().then(setChannelInfo).catch(err => {
+      console.warn('[channel]', err?.message || err)
+    })
     setVideosLoading(true)
     api.videos()
       .then(r => setVideos(r.data))
-      .catch(() => {})
+      .catch(err => { console.warn('[videos]', err?.message || err) })
       .finally(() => setVideosLoading(false))
     setTrendingLoading(true)
     api.trending()
       .then(setTrending)
-      .catch(() => {})
+      .catch(err => { console.warn('[trending]', err?.message || err) })
       .finally(() => setTrendingLoading(false))
-    api.audience(dateRange).then(setAudienceData).catch(() => {})
-    api.revenueMonthly().then(r => setRevenueMonthly(r.data)).catch(() => {})
+    api.audience(dateRange).then(setAudienceData).catch(err => {
+      console.warn('[audience]', err?.message || err)
+    })
+    api.revenueMonthly().then(r => setRevenueMonthly(r.data)).catch(err => {
+      console.warn('[revenue-monthly]', err?.message || err)
+    })
   }, [authenticated])
 
   // Fetch analytics when range changes
@@ -187,9 +193,11 @@ export default function App() {
     setAnalyticsLoading(true)
     api.analytics(dateRange)
       .then(r => { setAnalyticsData(r.data); setRevenueIncluded(r.revenueIncluded) })
-      .catch(() => {})
+      .catch(err => { console.warn('[analytics]', err?.message || err) })
       .finally(() => setAnalyticsLoading(false))
-    api.traffic(dateRange).then(r => setTrafficSources(r.data)).catch(() => {})
+    api.traffic(dateRange).then(r => setTrafficSources(r.data)).catch(err => {
+      console.warn('[traffic]', err?.message || err)
+    })
   }, [authenticated, dateRange])
 
   const metricsData = analyticsData ?? []

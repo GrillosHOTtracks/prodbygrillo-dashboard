@@ -1,4 +1,5 @@
 const express = require('express')
+const fs = require('fs')
 const accountManager = require('../accountManager')
 
 const router = express.Router()
@@ -37,6 +38,21 @@ router.get('/callback', async (req, res) => {
 router.post('/logout', (_req, res) => {
   accountManager.logout()
   res.json({ ok: true })
+})
+
+// Returns current token as base64 — copy this into GOOGLE_TOKEN Railway env var
+router.get('/token-export', (_req, res) => {
+  try {
+    const tokenPath = accountManager.oauth?.tokenPath
+    if (!tokenPath || !fs.existsSync(tokenPath)) {
+      return res.status(404).json({ error: 'No token file found. Authenticate first.' })
+    }
+    const raw    = fs.readFileSync(tokenPath, 'utf8')
+    const b64    = Buffer.from(raw).toString('base64')
+    res.json({ base64: b64, hint: 'Set GOOGLE_TOKEN=<base64> in Railway Variables' })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
 })
 
 module.exports = router

@@ -20,25 +20,38 @@ let _cache = null
 
 // GET /api/videos?maxResults=25
 router.get('/', async (req, res) => {
+  if (_cache && Date.now() - _cache._ts < 15 * 60 * 1000) {
+    return res.json({ data: _cache.data, _cached: true })
+  }
+
   try {
     const maxResults = Math.min(parseInt(req.query.maxResults || '25'), 50)
     const result = await accountManager.withYouTube(async (auth) => {
       const youtube = google.youtube({ version: 'v3', auth })
       const ya      = google.youtubeAnalytics({ version: 'v2', auth })
 
-      // 1. Get channel ID
-      const chRes     = await youtube.channels.list({ part: ['id'], mine: true })
-      const channelId = chRes.data.items?.[0]?.id
-      if (!channelId) return []
-
-      // 2. Get top videos by viewCount
-      const searchRes = await youtube.search.list({
-        part: ['id'], channelId, type: ['video'], order: 'viewCount', maxResults,
+      // 1. Get channel + uploadsPlaylist (1 quota unit)
+      const chRes = await youtube.channels.list({
+        part: ['id', 'contentDetails'], mine: true,
       })
-      const videoIds = (searchRes.data.items || []).map(i => i.id.videoId).filter(Boolean)
+      const channel = chRes.data.items?.[0]
+      if (!channel) return []
+      const channelId       = channel.id
+      const uploadsPlaylist = channel.contentDetails?.relatedPlaylists?.uploads
+      if (!uploadsPlaylist) return []
+
+      // 2. Get latest videos from uploads playlist (1 quota unit per page)
+      // playlistItems.list costs 1 unit vs search.list which costs 100 units
+      const playlistRes = await youtube.playlistItems.list({
+        part: ['contentDetails'], playlistId: uploadsPlaylist,
+        maxResults: maxResults,
+      })
+      const videoIds = (playlistRes.data.items || [])
+        .map(i => i.contentDetails?.videoId)
+        .filter(Boolean)
       if (!videoIds.length) return []
 
-      // 3. Get full video details
+      // 3. Get full video details (1 quota unit)
       const videosRes = await youtube.videos.list({
         part: ['snippet', 'statistics', 'contentDetails'],
         id:   videoIds,
@@ -59,7 +72,7 @@ router.get('/', async (req, res) => {
         status:      'published',
       }))
 
-      // 4. Per-video analytics
+      // 4. Per-video analytics (1 quota unit)
       const analyticsParams = {
         ids:        'channel==MINE',
         startDate:  '2020-01-01',
@@ -107,12 +120,13 @@ router.get('/', async (req, res) => {
         }
       }
 
+      // Sort by views descending
       return videos.sort((a, b) => b.views - a.views)
     })
-    _cache = { data: result, _cachedAt: new Date().toISOString() }
+    _cache = { data: result, _ts: Date.now() }
     res.json({ data: result })
   } catch (err) {
-    if (isQuotaError(err) && _cache) return res.json({ ..._cache, _cached: true })
+    if (isQuotaError(err) && _cache) return res.json({ data: _cache.data, _cached: true })
     sendError(res, err, 'videos route')
   }
 })

@@ -52,7 +52,8 @@ router.get('/', async (req, res) => {
       const now            = new Date()
       const publishedAfter = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString()
 
-      const queries = ['type beat 2025', 'free type beat 2025', 'trap type beat 2025']
+      const year = new Date().getFullYear()
+      const queries = [`type beat ${year}`, `free type beat ${year}`, `trap type beat ${year}`]
 
       const searches = await Promise.all(
         queries.map(q =>

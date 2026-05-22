@@ -5,9 +5,15 @@ const { isQuotaError, sendError } = require('../apiError')
 
 const router = express.Router()
 
+// Cache channel info for 30 minutes (saves 1 quota unit per request)
 let _cache = null
+const CACHE_TTL = 30 * 60 * 1000
 
 router.get('/', async (req, res) => {
+  if (!req.query.bust && _cache && Date.now() - _cache._ts < CACHE_TTL) {
+    return res.json({ ..._cache.data, _cached: true })
+  }
+
   try {
     const result = await accountManager.withYouTube(async (auth) => {
       const youtube = google.youtube({ version: 'v3', auth })
@@ -31,10 +37,10 @@ router.get('/', async (req, res) => {
       }
     })
     if (!result) return res.status(404).json({ error: 'Channel not found' })
-    _cache = { ...result, _cachedAt: new Date().toISOString() }
+    _cache = { data: result, _ts: Date.now() }
     res.json(result)
   } catch (err) {
-    if (isQuotaError(err) && _cache) return res.json({ ..._cache, _cached: true })
+    if (isQuotaError(err) && _cache) return res.json({ ..._cache.data, _cached: true })
     sendError(res, err, 'channel route')
   }
 })
