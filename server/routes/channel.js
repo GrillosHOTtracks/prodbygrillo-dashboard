@@ -1,46 +1,69 @@
 const express = require('express')
 const { google } = require('googleapis')
+const fs   = require('fs')
+const path = require('path')
+const os   = require('os')
 const accountManager = require('../accountManager')
 const { isQuotaError, sendError } = require('../apiError')
 
-const router = express.Router()
+const router  = express.Router()
+const CACHE_FILE = path.join(os.tmpdir(), 'channel_info.json')
+const MEM_TTL    = 30 * 60 * 1000  // 30 min in-memory TTL
 
-// Cache channel info for 30 minutes (saves 1 quota unit per request)
-let _cache = null
-const CACHE_TTL = 30 * 60 * 1000
+let _mem = null  // { data, _ts }
+
+function loadDisk() {
+  try {
+    if (fs.existsSync(CACHE_FILE)) {
+      return JSON.parse(fs.readFileSync(CACHE_FILE, 'utf8'))
+    }
+  } catch {}
+  return null
+}
+
+function saveDisk(data) {
+  try { fs.writeFileSync(CACHE_FILE, JSON.stringify(data)) } catch {}
+}
 
 router.get('/', async (req, res) => {
-  if (!req.query.bust && _cache && Date.now() - _cache._ts < CACHE_TTL) {
-    return res.json({ ..._cache.data, _cached: true })
+  // Serve in-memory cache (30 min)
+  if (!req.query.bust && _mem && Date.now() - _mem._ts < MEM_TTL) {
+    return res.json({ ..._mem.data, _cached: true })
   }
 
   try {
     const result = await accountManager.withYouTube(async (auth) => {
       const youtube = google.youtube({ version: 'v3', auth })
       const { data } = await youtube.channels.list({
-        part: ['snippet', 'statistics', 'brandingSettings'],
+        part: ['snippet', 'statistics', 'contentDetails'],
         mine: true,
       })
       const ch = data.items?.[0]
       if (!ch) return null
       return {
-        id:          ch.id,
-        name:        ch.snippet.title,
-        handle:      ch.snippet.customUrl || `@${ch.snippet.title}`,
-        description: ch.snippet.description,
-        thumbnail:   ch.snippet.thumbnails?.default?.url,
-        country:     ch.snippet.country || 'BR',
-        publishedAt: ch.snippet.publishedAt,
-        subscribers: parseInt(ch.statistics.subscriberCount || '0'),
-        totalViews:  parseInt(ch.statistics.viewCount || '0'),
-        totalVideos: parseInt(ch.statistics.videoCount || '0'),
+        id:               ch.id,
+        name:             ch.snippet.title,
+        handle:           ch.snippet.customUrl || `@${ch.snippet.title}`,
+        description:      ch.snippet.description,
+        thumbnail:        ch.snippet.thumbnails?.default?.url,
+        country:          ch.snippet.country || 'BR',
+        publishedAt:      ch.snippet.publishedAt,
+        subscribers:      parseInt(ch.statistics.subscriberCount || '0'),
+        totalViews:       parseInt(ch.statistics.viewCount || '0'),
+        totalVideos:      parseInt(ch.statistics.videoCount || '0'),
+        uploadsPlaylist:  ch.contentDetails?.relatedPlaylists?.uploads || null,
       }
     })
     if (!result) return res.status(404).json({ error: 'Channel not found' })
-    _cache = { data: result, _ts: Date.now() }
+    _mem = { data: result, _ts: Date.now() }
+    saveDisk(result)
     res.json(result)
   } catch (err) {
-    if (isQuotaError(err) && _cache) return res.json({ ..._cache.data, _cached: true })
+    // On quota/error: try memory, then disk
+    if (isQuotaError(err)) {
+      const cached = _mem?.data || loadDisk()
+      if (cached) return res.json({ ...cached, _cached: true })
+    }
     sendError(res, err, 'channel route')
   }
 })

@@ -1,9 +1,23 @@
 const express = require('express')
 const { google } = require('googleapis')
+const fs   = require('fs')
+const path = require('path')
+const os   = require('os')
 const accountManager = require('../accountManager')
 const { isQuotaError, sendError } = require('../apiError')
 
 const router = express.Router()
+const CACHE_FILE = path.join(os.tmpdir(), 'trending_cache.json')
+
+function loadDisk() {
+  try {
+    if (fs.existsSync(CACHE_FILE)) return JSON.parse(fs.readFileSync(CACHE_FILE, 'utf8'))
+  } catch {}
+  return null
+}
+function saveDisk(data) {
+  try { fs.writeFileSync(CACHE_FILE, JSON.stringify(data)) } catch {}
+}
 
 function decodeHtml(str) {
   return str
@@ -107,8 +121,11 @@ router.get('/', async (req, res) => {
 
     _cache   = result
     _cacheTs = Date.now()
+    saveDisk(result)
     res.json(result)
   } catch (err) {
+    const cached = _cache || loadDisk()
+    if (cached) { _cache = cached; _cacheTs = Date.now(); return res.json(cached) }
     sendError(res, err, 'trending route')
   }
 })
