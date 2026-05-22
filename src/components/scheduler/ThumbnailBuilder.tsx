@@ -36,7 +36,7 @@ export function ThumbnailBuilder({ beatName, artists, onReady }: Props) {
     setLoading(true)
     setQuotaError(false)
 
-    fetch(`http://localhost:3010/api/upload/artist-photo?name=${encodeURIComponent(name)}`)
+    fetch(`/api/upload/artist-photo?name=${encodeURIComponent(name)}`)
       .then(r => r.json())
       .then(data => {
         if (data.code === 'quotaExceeded') { setQuotaError(true); return }
@@ -55,7 +55,7 @@ export function ThumbnailBuilder({ beatName, artists, onReady }: Props) {
       drawWithoutPhoto()
       return
     }
-    const proxied = `http://localhost:3010/api/upload/proxy-image?url=${encodeURIComponent(current.url)}`
+    const proxied = `/api/upload/proxy-image?url=${encodeURIComponent(current.url)}`
     const img = new Image()
     img.crossOrigin = 'anonymous'
     img.onload  = () => draw(img)

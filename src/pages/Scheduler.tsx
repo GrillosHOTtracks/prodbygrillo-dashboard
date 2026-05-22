@@ -121,7 +121,7 @@ function UploadHistory({ refreshKey }: { refreshKey: number }) {
   async function load() {
     setLoading(true)
     try {
-      const r = await fetch('http://localhost:3010/api/upload/history')
+      const r = await fetch('/api/upload/history')
       if (r.ok) setHistory(await r.json())
     } finally { setLoading(false) }
   }
@@ -129,13 +129,13 @@ function UploadHistory({ refreshKey }: { refreshKey: number }) {
   async function refreshViews() {
     setRefreshing(true)
     try {
-      const r = await fetch('http://localhost:3010/api/upload/history/refresh', { method: 'POST' })
+      const r = await fetch('/api/upload/history/refresh', { method: 'POST' })
       if (r.ok) setHistory(await r.json())
     } finally { setRefreshing(false) }
   }
 
   async function deleteEntry(id: string) {
-    await fetch(`http://localhost:3010/api/upload/history/${id}`, { method: 'DELETE' })
+    await fetch(`/api/upload/history/${id}`, { method: 'DELETE' })
     setHistory(h => h.filter(e => e.id !== id))
   }
 
@@ -255,7 +255,7 @@ export function Scheduler() {
     setUploadVideoId(null)
 
     try {
-      const res = await fetch('http://localhost:3010/api/ai/analyze-beat', {
+      const res = await fetch('/api/ai/analyze-beat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ beatName: beatName.trim() }),
@@ -312,7 +312,7 @@ export function Scheduler() {
         scheduledAt:      scheduledAt || undefined,
       }))
 
-      const res = await fetch('http://localhost:3010/api/upload/video', { method: 'POST', body: formData })
+      const res = await fetch('/api/upload/video', { method: 'POST', body: formData })
 
       if (!res.ok) {
         const body = await res.json().catch(() => ({}))
