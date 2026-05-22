@@ -64,8 +64,8 @@ router.get('/', async (req, res) => {
     const cached = _mem?.data || loadDisk()
 
     if (isQuotaError(err) || err?.code === 'UNAUTHENTICATED') {
-      // Try Innertube for public data if we have a channelId
-      const channelId = cached?.id
+      // Try Innertube for public data — use cached id or env var as ultimate fallback
+      const channelId = cached?.id || process.env.CHANNEL_ID
       if (channelId) {
         try {
           const pub = await innertube.channelInfo(channelId)
@@ -87,6 +87,21 @@ router.get('/', async (req, res) => {
         }
       }
       if (cached) return res.json({ ...cached, _cached: true })
+
+      // Last resort: seed from env vars so Overview never shows empty
+      if (process.env.CHANNEL_ID) {
+        const seed = {
+          id:          process.env.CHANNEL_ID,
+          name:        process.env.CHANNEL_NAME    || '',
+          handle:      process.env.CHANNEL_HANDLE  || '',
+          country:     'BR',
+          subscribers: parseInt(process.env.CHANNEL_SUBS   || '0'),
+          totalViews:  parseInt(process.env.CHANNEL_VIEWS  || '0'),
+          totalVideos: parseInt(process.env.CHANNEL_VIDEOS || '0'),
+          _seeded:     true,
+        }
+        return res.json(seed)
+      }
     }
 
     sendError(res, err, 'channel route')
