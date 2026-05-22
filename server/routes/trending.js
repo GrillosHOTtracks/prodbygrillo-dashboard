@@ -42,6 +42,8 @@ function extractArtist(rawTitle) {
 
   if (!artist || artist.length < 2 || artist.length > 40) return null
   if (/^\d+$/.test(artist)) return null
+  // Filter out bare genre words mistaken as artists
+  if (/^(trap|drill|rnb|r&b|afro|pop|melodic|sad|dark|hard|phonk|freestyle|latino|afrobeat|afrobeats|chill|lofi|lo-fi|boom\s*bap|gangsta|old\s*school)$/i.test(artist)) return null
 
   return artist.toLowerCase().replace(/(^|\s|-)(\w)/g, (_, pre, char) => pre + char.toUpperCase())
 }
