@@ -7,17 +7,30 @@ const os   = require('os')
 const REDIRECT_URI = process.env.REDIRECT_URI || 'http://localhost:3010/api/auth/callback'
 
 // Bootstrap credentials from env vars (production/Railway)
+// Accepts raw JSON string or base64-encoded JSON
+function decodeCredential(val) {
+  if (!val) return null
+  const trimmed = val.trim()
+  // If it starts with { it's raw JSON
+  if (trimmed.startsWith('{')) return trimmed
+  // Otherwise treat as base64
+  return Buffer.from(trimmed.replace(/\s+/g, ''), 'base64').toString('utf8')
+}
+
 function bootstrapFromEnv() {
-  if (process.env.GOOGLE_CREDENTIALS) {
+  const creds = decodeCredential(process.env.GOOGLE_CREDENTIALS)
+  if (creds) {
     try {
-      const dest = path.join(os.tmpdir(), 'client_secret.json')
-      fs.writeFileSync(dest, Buffer.from(process.env.GOOGLE_CREDENTIALS, 'base64').toString('utf8'))
-    } catch (e) { console.warn('[ACCOUNTS] Could not write GOOGLE_CREDENTIALS:', e.message) }
+      JSON.parse(creds) // validate before writing
+      fs.writeFileSync(path.join(os.tmpdir(), 'client_secret.json'), creds)
+      console.log('[ACCOUNTS] GOOGLE_CREDENTIALS loaded OK')
+    } catch (e) { console.warn('[ACCOUNTS] GOOGLE_CREDENTIALS invalid:', e.message) }
   }
-  if (process.env.GOOGLE_TOKEN) {
+  const token = decodeCredential(process.env.GOOGLE_TOKEN)
+  if (token) {
     try {
-      const dest = path.join(os.tmpdir(), 'token.json')
-      fs.writeFileSync(dest, Buffer.from(process.env.GOOGLE_TOKEN, 'base64').toString('utf8'))
+      JSON.parse(token)
+      fs.writeFileSync(path.join(os.tmpdir(), 'token.json'), token)
     } catch (e) { console.warn('[ACCOUNTS] Could not write GOOGLE_TOKEN:', e.message) }
   }
 }
