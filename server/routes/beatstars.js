@@ -52,8 +52,13 @@ router.post('/publish', upload.single('audio'), async (req, res) => {
     sse(res, { status: 'LAUNCHING', message: 'Iniciando navegador...' })
 
     const puppeteer = require('puppeteer')
+    const executablePath =
+      process.env.PUPPETEER_EXECUTABLE_PATH ||
+      process.env.CHROME_BIN ||
+      '/usr/bin/chromium-browser'
     browser = await puppeteer.launch({
       headless: 'new',
+      executablePath,
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
