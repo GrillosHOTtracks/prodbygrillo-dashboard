@@ -112,15 +112,52 @@ Context: it is ${month} ${year}. You have deep knowledge of:
 - Beatmaker community keywords: "free type beat", "instrumental", "loop kit", "sample pack"
 - Which artists are currently hot in the streets vs charting on Billboard vs trending on TikTok
 - How to write descriptions that rank for long-tail searches AND satisfy the YouTube algorithm
+- Musical theory — infer BPM and key signature from the beat name, mood keywords, and genre context
 - The difference between "type beat" keyword clustering vs. artist-specific search intent
+
+CRITICAL — The "description" field MUST use EXACTLY this template. Fill in only the bracketed placeholders; copy everything else character-for-character including all emojis, dashes, and symbols:
+
+🦗 [TOP 2-3 ARTISTS FROM matchingArtists, e.g. "Lil Baby x Rod Wave"] Type Beat - "[BEAT_NAME]" prodbygrillo
+
+💰 BUY (Untagged): https://www.beatstars.com/prodbygrillo
+
+🎵 [INFERRED_BPM] BPM | [INFERRED_KEY]
+
+📋 LEASING:
+* MP3 Lease - $24.99
+
+📩 Custom beats & exclusives: DM @prodbygrillo
+
+━━━━━━━━━━━━━━━━━━━
+🚫 TERMS OF USE 🚫
+━━━━━━━━━━━━━━━━━━━
+✅ FREE for non-profit use only
+✅ MUST credit: "prodbygrillo" in the title
+✅ MUST tag @prodbygrillo on social media
+❌ NO monetization without purchasing a lease
+❌ NO distribution to Spotify/Apple Music without lease
+❌ NO selling, leasing or transferring this beat
+
+━━━━━━━━━━━━━━━━━━━
+🔗 FOLLOW
+━━━━━━━━━━━━━━━━━━━
+📱 TikTok: @prodbygrillo
+📷 Instagram: @prodbygrillo
+🛒 BeatStars: beatstars.com/prodbygrillo
+
+[ALL HASHTAGS FROM hashtags ARRAY JOINED WITH SPACES]
+
+The description value in JSON must be a single string with \\n for every line break. Keep all emojis, ━ symbols, ✅ ❌ exactly as shown above.
 
 Return ONLY valid JSON, no markdown, no extra text. Use this exact structure:
 
 {
   "seoScore": <integer 0-100>,
+  "bpm": <estimated BPM as integer, inferred from beat name, mood, and genre cues>,
+  "key": "<estimated musical key, e.g. Am, Gm, F#m, C major — inferred from name and vibe>",
   "titleAnalysis": {
     "score": <integer 0-100>,
-    "charCount": <character count of the original name>,
+    "charCount": <character count of the original beat name>,
     "strengths": ["strength 1", "strength 2"],
     "issues": ["issue 1", "issue 2"],
     "alternatives": [
@@ -130,7 +167,7 @@ Return ONLY valid JSON, no markdown, no extra text. Use this exact structure:
     ]
   },
   "optimizedTitle": "full optimized YouTube title (max 70 chars)",
-  "description": "full YouTube description in English with 3 paragraphs separated by \\n\\n: 1) about the beat and its vibe, 2) natural keywords and artists it fits, 3) call-to-action with licensing contact info.",
+  "description": "<FULL DESCRIPTION USING THE TEMPLATE ABOVE — single string, \\n for each line break>",
   "tags": ["tag1", "tag2", "tag3", "tag4", "tag5", "tag6", "tag7", "tag8", "tag9", "tag10", "tag11", "tag12", "tag13", "tag14", "tag15"],
   "hashtags": ["#hashtag1", "#hashtag2", "#hashtag3", "#hashtag4", "#hashtag5", "#hashtag6", "#hashtag7", "#hashtag8", "#hashtag9", "#hashtag10"],
   "thumbnail": {
@@ -184,7 +221,7 @@ router.post('/analyze-beat', async (req, res) => {
     let fullText = ''
     const stream = await client.chat.completions.create({
       model: 'llama-3.3-70b-versatile',
-      max_tokens: 2048,
+      max_tokens: 3500,
       stream: true,
       messages: [{ role: 'user', content: buildPrompt(beatName.trim()) }],
     })

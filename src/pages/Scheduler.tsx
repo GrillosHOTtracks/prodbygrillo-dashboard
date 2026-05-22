@@ -4,6 +4,8 @@ import { ThumbnailBuilder } from '../components/scheduler/ThumbnailBuilder'
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface BeatAnalysis {
   seoScore: number
+  bpm?: number
+  key?: string
   titleAnalysis: { score: number; charCount: number; strengths: string[]; issues: string[]; alternatives: string[] }
   optimizedTitle: string
   description: string
@@ -648,6 +650,18 @@ export function Scheduler() {
                     {analysis!.trendingComparison.competitionLevel}
                   </p>
                 </div>
+                {analysis!.bpm && (
+                  <div style={{ textAlign: 'center' }}>
+                    <p style={dim}>BPM</p>
+                    <p style={{ color: '#ffffff', fontSize: '22px', fontWeight: 'bold', margin: 0 }}>{analysis!.bpm}</p>
+                  </div>
+                )}
+                {analysis!.key && (
+                  <div style={{ textAlign: 'center' }}>
+                    <p style={dim}>KEY</p>
+                    <p style={{ color: '#00ff00', fontSize: '22px', fontWeight: 'bold', margin: 0 }}>{analysis!.key}</p>
+                  </div>
+                )}
                 <div style={{ textAlign: 'center' }}>
                   <p style={dim}>MELHOR HORÁRIO</p>
                   <p style={{ color: '#00ff00', fontSize: '13px', fontWeight: 'bold', margin: 0 }}>{analysis!.postingSchedule.bestDay.toUpperCase()}</p>
