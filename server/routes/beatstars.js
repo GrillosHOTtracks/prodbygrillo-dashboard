@@ -78,59 +78,125 @@ router.post('/publish', upload.single('audio'), async (req, res) => {
     // ── Login ────────────────────────────────────────────────────────────────
     sse(res, { status: 'LOGGING_IN', message: 'Fazendo login no BeatStars...' })
     await page.goto('https://www.beatstars.com/login', { waitUntil: 'networkidle2' })
+    await new Promise(r => setTimeout(r, 1500))
 
-    // Accept cookies if dialog appears
+    // Accept cookies / consent dialogs
     try {
       await page.waitForSelector(
-        '[data-testid="accept-cookies"], .cookie-accept, #onetrust-accept-btn-handler, button[aria-label*="cookie" i], button[aria-label*="accept" i]',
-        { timeout: 5000 }
+        '#onetrust-accept-btn-handler, .cookie-accept, [data-testid="accept-cookies"]',
+        { timeout: 4000 }
       )
-      await page.click('[data-testid="accept-cookies"], .cookie-accept, #onetrust-accept-btn-handler')
+      await page.click('#onetrust-accept-btn-handler, .cookie-accept, [data-testid="accept-cookies"]')
     } catch {}
 
-    // Fill email — try multiple selectors
-    const emailSel = 'input[name="email"], input[type="email"], input[placeholder*="email" i], input[autocomplete="email"]'
-    await page.waitForSelector(emailSel, { timeout: 15000 })
-    await page.click(emailSel)
-    await page.type(emailSel, email, { delay: 50 })
-
-    // BeatStars may be single-step or two-step (email → Continue → password)
-    // Try pressing Enter or clicking Continue/Next first; if a password field
-    // already exists we skip straight to filling it.
-    const pwSel = 'input[name="password"], input[type="password"], input[placeholder*="password" i], input[autocomplete="current-password"]'
-    const pwAlreadyVisible = await page.$(pwSel) !== null
-
-    if (!pwAlreadyVisible) {
-      // Two-step: click Continue / Next / Submit on the email step
-      const continueSel = 'button[type="submit"], button[data-testid*="continue" i], button[data-testid*="next" i], button:has-text("Continue"), button:has-text("Next")'
-      try {
-        await page.click(continueSel)
-      } catch {
-        // Fallback: press Enter on the email field
-        await page.keyboard.press('Enter')
-      }
-      // Wait for password field to appear (up to 10s)
-      await page.waitForSelector(pwSel, { timeout: 10000 })
+    // Log ALL inputs on the page so we can see the real selectors in Railway logs
+    async function dumpInputs(label) {
+      const inputs = await page.evaluate(() =>
+        Array.from(document.querySelectorAll('input')).map(el => ({
+          type: el.type, name: el.name, id: el.id,
+          placeholder: el.placeholder, autocomplete: el.autocomplete,
+          'aria-label': el.getAttribute('aria-label'),
+          visible: !!(el.offsetWidth || el.offsetHeight),
+          classes: el.className.slice(0, 80),
+        }))
+      )
+      console.log(`[BEATSTARS] ${label} — inputs:`, JSON.stringify(inputs))
+      return inputs
     }
 
-    await page.click(pwSel)
-    await page.type(pwSel, password, { delay: 50 })
+    // Fill email using page.evaluate (works regardless of framework)
+    async function fillInput(finder, value) {
+      return page.evaluate(({ finder, value }) => {
+        const inputs = Array.from(document.querySelectorAll('input'))
+        const el = inputs.find(i =>
+          i.type === finder ||
+          (i.name || '').toLowerCase().includes(finder) ||
+          (i.placeholder || '').toLowerCase().includes(finder) ||
+          (i.autocomplete || '').toLowerCase().includes(finder) ||
+          (i.getAttribute('aria-label') || '').toLowerCase().includes(finder) ||
+          (i.id || '').toLowerCase().includes(finder)
+        )
+        if (!el) return false
+        el.focus()
+        // React-compatible value set
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set
+        if (setter) setter.call(el, value)
+        el.dispatchEvent(new Event('input',  { bubbles: true }))
+        el.dispatchEvent(new Event('change', { bubbles: true }))
+        return true
+      }, { finder, value })
+    }
 
-    // Submit login form
+    await dumpInputs('initial page')
+
+    // Fill email field
+    const emailFilled = await fillInput('email', email)
+    if (!emailFilled) {
+      // Last resort: type into first visible input
+      await page.evaluate((v) => {
+        const el = document.querySelector('input')
+        if (el) { el.focus(); el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })) }
+      }, email)
+    }
+    await new Promise(r => setTimeout(r, 400))
+
+    // Click the submit / Continue button to advance to password step
+    const clicked = await page.evaluate(() => {
+      const btn = document.querySelector('button[type="submit"]') ||
+                  Array.from(document.querySelectorAll('button')).find(b =>
+                    /continue|next|login|sign\s*in|entrar/i.test(b.textContent || '')
+                  )
+      if (btn) { btn.click(); return true }
+      return false
+    })
+    if (!clicked) await page.keyboard.press('Enter')
+
+    // Wait for password field to appear — poll the DOM directly
+    await page.waitForFunction(() => {
+      const inputs = Array.from(document.querySelectorAll('input'))
+      return inputs.some(i =>
+        i.type === 'password' ||
+        (i.name || '').toLowerCase().includes('password') ||
+        (i.placeholder || '').toLowerCase().includes('password') ||
+        (i.autocomplete || '').toLowerCase().includes('password') ||
+        (i.getAttribute('aria-label') || '').toLowerCase().includes('password') ||
+        (i.id || '').toLowerCase().includes('password')
+      )
+    }, { timeout: 12000 }).catch(async () => {
+      // Log what we actually see before throwing
+      await dumpInputs('after email submit — password NOT found')
+    })
+
+    await dumpInputs('after email submit')
+    await new Promise(r => setTimeout(r, 400))
+
+    // Fill password
+    const pwFilled = await fillInput('password', password)
+    if (!pwFilled) throw new Error('Campo de password não encontrado na página do BeatStars — ver logs do Railway')
+
+    await new Promise(r => setTimeout(r, 300))
+
+    // Submit
     await Promise.all([
       page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {}),
-      page.keyboard.press('Enter'),
+      page.evaluate(() => {
+        const btn = document.querySelector('button[type="submit"]') ||
+                    Array.from(document.querySelectorAll('button')).find(b =>
+                      /login|sign\s*in|entrar|continue/i.test(b.textContent || '')
+                    )
+        if (btn) btn.click()
+        else document.querySelector('input[type="password"]')?.form?.submit()
+      }),
     ])
 
-    // Give SPA a moment to settle
-    await new Promise(r => setTimeout(r, 2000))
+    await new Promise(r => setTimeout(r, 2500))
 
-    // Verify login succeeded
+    // Verify login
     const afterLoginUrl = page.url()
+    console.log('[BEATSTARS] URL after login:', afterLoginUrl)
     if (afterLoginUrl.includes('/login') || afterLoginUrl.includes('/signin')) {
-      // Dump a screenshot path for debugging
-      try { await page.screenshot({ path: '/tmp/bs_login_fail.png' }) } catch {}
-      sse(res, { status: 'ERROR', error: 'Login falhou — verifica BEATSTARS_EMAIL e BEATSTARS_PASSWORD no Railway' })
+      await dumpInputs('still on login page')
+      sse(res, { status: 'ERROR', error: 'Login falhou — credenciais incorretas ou BeatStars bloqueou o acesso' })
       res.write('data: [DONE]\n\n')
       return res.end()
     }
