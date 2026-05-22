@@ -77,13 +77,26 @@ app.get('/api/health', (_req, res) => {
   const upid = process.env.UPLOADS_PLAYLIST_ID
   if (cid) {
     const cacheFile = path.join(os.tmpdir(), 'channel_info.json')
-    if (!fs.existsSync(cacheFile)) {
-      const seed = {
+    const existing  = fs.existsSync(cacheFile)
+      ? (() => { try { return JSON.parse(fs.readFileSync(cacheFile, 'utf8')) } catch { return null } })()
+      : null
+    // Only seed if no real data cached yet
+    if (!existing || existing._seeded) {
+      let seed
+      try {
+        // CHANNEL_SEED env var can contain full JSON (set it via Railway after first successful fetch)
+        seed = process.env.CHANNEL_SEED ? JSON.parse(process.env.CHANNEL_SEED) : null
+      } catch {}
+      seed = seed || {
         id: cid,
         uploadsPlaylist: upid || ('UU' + cid.slice(2)),
-        name: '', handle: '', description: '', thumbnail: '',
+        name: process.env.CHANNEL_NAME || '',
+        handle: process.env.CHANNEL_HANDLE || '',
+        description: '', thumbnail: '',
         country: 'BR', publishedAt: '',
-        subscribers: 0, totalViews: 0, totalVideos: 0,
+        subscribers: parseInt(process.env.CHANNEL_SUBS || '0'),
+        totalViews: parseInt(process.env.CHANNEL_VIEWS || '0'),
+        totalVideos: parseInt(process.env.CHANNEL_VIDEOS || '0'),
         _seeded: true,
       }
       try { fs.writeFileSync(cacheFile, JSON.stringify(seed)); console.log('[SERVER] Channel cache seeded from env') } catch {}
