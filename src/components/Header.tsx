@@ -24,9 +24,17 @@ interface HeaderProps {
   authenticated?: boolean
   isDemo?: boolean
   channelId?: string
+  onLogout?: () => void
 }
 
-export function Header({ currentPage, dateRange, onDateRangeChange, authenticated, isDemo, channelId }: HeaderProps) {
+export function Header({ currentPage, dateRange, onDateRangeChange, authenticated, isDemo, channelId, onLogout }: HeaderProps) {
+  async function handleLogout() {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' })
+    } finally {
+      onLogout?.()
+    }
+  }
   const now = new Date().toISOString().replace('T', ' ').slice(0, 19)
 
   return (
@@ -111,6 +119,33 @@ export function Header({ currentPage, dateRange, onDateRangeChange, authenticate
         >
           [YT STUDIO]
         </a>
+
+        {authenticated && (
+          <button
+            onClick={handleLogout}
+            style={{
+              backgroundColor: 'transparent',
+              color: '#ff4400',
+              border: '1px solid #ff4400',
+              padding: '4px 10px',
+              fontSize: '11px',
+              letterSpacing: '1px',
+              fontFamily: 'Courier New, monospace',
+              cursor: 'pointer',
+              transition: `background var(--t-fast), color var(--t-fast)`,
+            }}
+            onMouseEnter={e => {
+              const el = e.currentTarget as HTMLElement
+              el.style.backgroundColor = '#ff440022'
+            }}
+            onMouseLeave={e => {
+              const el = e.currentTarget as HTMLElement
+              el.style.backgroundColor = 'transparent'
+            }}
+          >
+            [LOGOUT]
+          </button>
+        )}
 
         <span style={{ color: 'var(--text-faint)', fontSize: '12px' }}>&lt;PG&gt;</span>
       </div>

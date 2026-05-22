@@ -258,6 +258,11 @@ export default function App() {
             authenticated={authenticated}
             isDemo={false}
             channelId={channelInfo?.id}
+            onLogout={async () => {
+              setAuthenticated(false)
+              setAnalyticsData(null)
+              setChannelInfo(null)
+            }}
           />
           <main style={{ flex: 1, overflowY: 'auto', padding: '14px', backgroundColor: 'var(--bg)' }}>
             {renderPage()}
