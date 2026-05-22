@@ -5,7 +5,7 @@ const path    = require('path')
 const fs      = require('fs')
 
 const router  = express.Router()
-const upload  = multer({ dest: os.tmpdir(), limits: { fileSize: 500 * 1024 * 1024 } })
+const upload  = multer({ dest: os.tmpdir(), limits: { fileSize: 500 * 1024 * 1024, fieldSize: 20 * 1024 * 1024 } })
 
 function sse(res, event) {
   res.write(`data: ${JSON.stringify(event)}\n\n`)
