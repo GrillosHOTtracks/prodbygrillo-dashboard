@@ -48,16 +48,19 @@ router.get('/', async (req, res) => {
     return res.json({ data: _cache.data, _cached: true })
   }
 
+  // Declared outside try so catch block can access for RSS fallback
+  let channelId, uploadsPlaylist
+
   try {
     const maxResults = Math.min(parseInt(req.query.maxResults || '25'), 50)
 
     // Step 1: resolve channelId + uploadsPlaylistId
     // Try channel cache first (avoids OAuth Data API call when quota exceeded)
-    let channelId, uploadsPlaylist
     const channelDisk = loadDisk(CHANNEL_CACHE_FILE)
     if (channelDisk?.id) {
       channelId       = channelDisk.id
       uploadsPlaylist = channelDisk.uploadsPlaylist || uploadsFromChannelId(channelId)
+
     } else {
       // Fall back to live OAuth call
       const chData = await accountManager.withYouTube(async (auth) => {

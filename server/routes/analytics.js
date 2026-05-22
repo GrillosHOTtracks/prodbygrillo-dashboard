@@ -150,9 +150,9 @@ router.get('/revenue-monthly', async (req, res) => {
     const rows = await accountManager.withYouTube(async (auth) => {
       const ya  = google.youtubeAnalytics({ version: 'v2', auth })
       const now = new Date()
-      // dimensions=month requires dates aligned to month boundaries
-      const endDate   = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 0)).toISOString().split('T')[0]  // last day of prev month
-      const startDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 12, 1)).toISOString().split('T')[0] // 12 months ago
+      // dimensions=month requires both dates to be the 1st of a month
+      const endDate   = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1)).toISOString().split('T')[0]  // 1st of prev month
+      const startDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 12, 1)).toISOString().split('T')[0] // 1st, 12 months ago
 
       const { data } = await ya.reports.query({
         ids: 'channel==MINE', startDate, endDate,
