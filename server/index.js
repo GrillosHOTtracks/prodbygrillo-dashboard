@@ -70,6 +70,27 @@ app.get('/api/health', (_req, res) => {
   res.json({ ok: true, authenticated: accountManager.isAuthenticated(), ts: new Date().toISOString() })
 })
 
+// Seed channel cache from env vars (avoids OAuth Data API call on cold start)
+{
+  const os   = require('os')
+  const cid  = process.env.CHANNEL_ID
+  const upid = process.env.UPLOADS_PLAYLIST_ID
+  if (cid) {
+    const cacheFile = path.join(os.tmpdir(), 'channel_info.json')
+    if (!fs.existsSync(cacheFile)) {
+      const seed = {
+        id: cid,
+        uploadsPlaylist: upid || ('UU' + cid.slice(2)),
+        name: '', handle: '', description: '', thumbnail: '',
+        country: 'BR', publishedAt: '',
+        subscribers: 0, totalViews: 0, totalVideos: 0,
+        _seeded: true,
+      }
+      try { fs.writeFileSync(cacheFile, JSON.stringify(seed)); console.log('[SERVER] Channel cache seeded from env') } catch {}
+    }
+  }
+}
+
 // Serve built frontend in production
 const distPath = path.join(process.cwd(), 'dist')
 console.log('[SERVER] cwd:', process.cwd())
