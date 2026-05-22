@@ -421,6 +421,42 @@ export function IconCursor({ size = 16 }: { size?: number }) {
   )
 }
 
+// ─── Store / Shopping Cart ────────────────────────────────────────────────────
+export function IconStore({ size = 20 }: { size?: number }) {
+  return (
+    <svg {...crisp} width={size} height={size}>
+      {/* Cart body shadow */}
+      <rect x="4"  y="18" width="16" height="2" fill="#003300"/>
+      <rect x="18" y="6"  width="2"  height="12" fill="#005500"/>
+      {/* Cart body */}
+      <rect x="2"  y="4"  width="16" height="14" fill="#00cc00"/>
+      <rect x="2"  y="4"  width="16" height="1"  fill="#00ff00"/>
+      <rect x="2"  y="4"  width="1"  height="14" fill="#00ff00"/>
+      {/* Cart screen / shelves */}
+      <rect x="4"  y="6"  width="12" height="10" fill="#001100"/>
+      {/* Shelf 1 */}
+      <rect x="5"  y="7"  width="10" height="2"  fill="#00cc00"/>
+      <rect x="5"  y="7"  width="10" height="1"  fill="#00ff00"/>
+      {/* Shelf 2 */}
+      <rect x="5"  y="11" width="10" height="2"  fill="#00cc00"/>
+      <rect x="5"  y="11" width="10" height="1"  fill="#00ff00"/>
+      {/* Price tags */}
+      <rect x="6"  y="9"  width="3"  height="1"  fill="#007700"/>
+      <rect x="11" y="9"  width="3"  height="1"  fill="#007700"/>
+      <rect x="6"  y="13" width="3"  height="1"  fill="#007700"/>
+      <rect x="11" y="13" width="3"  height="1"  fill="#007700"/>
+      {/* Handle / top bar */}
+      <rect x="8"  y="2"  width="6"  height="2"  fill="#00cc00"/>
+      <rect x="8"  y="2"  width="6"  height="1"  fill="#00ff00"/>
+      {/* Wheels */}
+      <rect x="6"  y="18" width="3"  height="3"  fill="#00cc00"/>
+      <rect x="6"  y="20" width="3"  height="1"  fill="#007700"/>
+      <rect x="13" y="18" width="3"  height="3"  fill="#00cc00"/>
+      <rect x="13" y="20" width="3"  height="1"  fill="#007700"/>
+    </svg>
+  )
+}
+
 // ─── AI / Chip ────────────────────────────────────────────────────────────────
 export function IconAI({ size = 20 }: { size?: number }) {
   return (

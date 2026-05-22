@@ -13,8 +13,9 @@ const pageTitles: Record<Page, string> = {
   analytics: '=[ ANALYTICS ]================================',
   audience:  '=[ AUDIENCE INSIGHTS ]========================',
   revenue:   '=[ REVENUE ]==================================',
-  scheduler: '=[ SCHEDULER / UPLOAD ]=======================',
-  settings:  '=[ SETTINGS ]=================================',
+  scheduler:  '=[ SCHEDULER / UPLOAD ]=======================',
+  beatstore:  '=[ BEAT STORE · BEATSTARS ]==================',
+  settings:   '=[ SETTINGS ]=================================',
 }
 
 interface HeaderProps {

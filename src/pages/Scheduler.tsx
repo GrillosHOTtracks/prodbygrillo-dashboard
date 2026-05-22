@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { ThumbnailBuilder } from '../components/scheduler/ThumbnailBuilder'
 import { analyzeAudio } from '../lib/audioAnalysis'
+import type { Page } from '../types'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface BeatAnalysis {
@@ -192,7 +193,7 @@ function UploadHistory({ refreshKey }: { refreshKey: number }) {
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
-export function Scheduler() {
+export function Scheduler({ onNavigate }: { onNavigate?: (page: Page) => void }) {
   const [step, setStep] = useState<1|2|3|4>(1)
 
   // ── Etapa 1: files
@@ -797,6 +798,51 @@ export function Scheduler() {
                 </button>
                 <p style={{ color: '#2a2a2a', fontSize: '9px', margin: '4px 0 0', letterSpacing: '1px' }}>IA usa ângulo diferente a cada análise · nunca repete</p>
               </div>
+
+              {/* Beat Store button */}
+              {onNavigate && (
+                <div style={{ borderTop: '1px solid #1a1a1a', paddingTop: '14px', textAlign: 'center' }}>
+                  <button
+                    onClick={() => {
+                      try {
+                        localStorage.setItem('beatstore_prefill', JSON.stringify({
+                          beatName,
+                          title: editTitle,
+                          description: editDesc,
+                          tags: editTags,
+                          hashtags: editHashtags,
+                          bpm: detectedBpm,
+                          key: detectedKey,
+                          thumbnail: thumbDataUrl,
+                        }))
+                      } catch { /* quota exceeded — proceed without thumbnail */
+                        try {
+                          localStorage.setItem('beatstore_prefill', JSON.stringify({
+                            beatName, title: editTitle, description: editDesc,
+                            tags: editTags, hashtags: editHashtags,
+                            bpm: detectedBpm, key: detectedKey, thumbnail: null,
+                          }))
+                        } catch {}
+                      }
+                      onNavigate('beatstore')
+                    }}
+                    style={{
+                      padding: '12px 32px', backgroundColor: '#0a1500', color: '#aaff00',
+                      border: '2px solid #aaff00', cursor: 'pointer',
+                      fontFamily: 'Courier New, monospace', fontSize: '13px',
+                      fontWeight: 'bold', letterSpacing: '2px',
+                      boxShadow: '0 0 12px rgba(170,255,0,0.15)',
+                    }}
+                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.backgroundColor = '#142000'; (e.currentTarget as HTMLElement).style.boxShadow = '0 0 20px rgba(170,255,0,0.3)' }}
+                    onMouseLeave={e => { (e.currentTarget as HTMLElement).style.backgroundColor = '#0a1500'; (e.currentTarget as HTMLElement).style.boxShadow = '0 0 12px rgba(170,255,0,0.15)' }}
+                  >
+                    [ ABRIR NO BEAT STORE ]
+                  </button>
+                  <p style={{ color: '#2a2a2a', fontSize: '9px', margin: '6px 0 0', letterSpacing: '1px' }}>
+                    Envia para BeatStars com todos os dados pré-preenchidos
+                  </p>
+                </div>
+              )}
             </div>
           )}
         </div>

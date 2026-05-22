@@ -28,6 +28,7 @@
     "jsonrepair": "^3.14.0",
     "lucide-react": "^1.16.0",
     "multer": "^2.1.1",
+    "puppeteer": "^25.0.4",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "recharts": "^3.8.1",

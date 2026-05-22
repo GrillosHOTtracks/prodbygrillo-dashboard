@@ -8,6 +8,7 @@ import { Audience } from './pages/Audience'
 import { Revenue } from './pages/Revenue'
 import { Settings } from './pages/Settings'
 import { Scheduler } from './pages/Scheduler'
+import { BeatStore } from './pages/BeatStore'
 import { api } from './lib/api'
 import type { Page, DateRange } from './types'
 import type { DailyRow, ChannelInfo, Video as ApiVideo, AudienceResponse, ArtistTrend, TrafficSource, MonthlyRevenue } from './lib/api'
@@ -231,7 +232,9 @@ export default function App() {
       case 'revenue':
         return <Revenue revenueMonthly={revenueMonthly} revenueIncluded={revenueIncluded} />
       case 'scheduler':
-        return <Scheduler />
+        return <Scheduler onNavigate={setPage} />
+      case 'beatstore':
+        return <BeatStore onNavigate={setPage} />
       case 'settings':
         return <Settings authenticated={authenticated} onLogout={async () => {
           setAuthenticated(false)
