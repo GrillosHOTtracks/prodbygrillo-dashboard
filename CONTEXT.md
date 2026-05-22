@@ -1,256 +1,228 @@
-# prodbygrillo-dashboard — Contexto Completo
+# prodbygrillo-dashboard — Contexto do Projeto
 
-## O que é
-Dashboard de analytics do YouTube do Prodbygrillo. Mostra dados do canal em tempo real — views, inscritos, receita, tendências, análise de beats por IA.
+## Visão Geral
 
-**Repo:** https://github.com/GrillosHOTtracks/prodbygrillo-dashboard
+Dashboard de analytics do canal YouTube **prodbygrillo** (`@prodbygrillo`). Aplicação fullstack com frontend React + backend Express, deployada no Railway. Autentica via OAuth do Google e carrega dados reais da YouTube Analytics API.
 
 ---
 
-## Stack
+## Stack Técnico
 
 | Camada | Tecnologia |
-|--------|------------|
-| Frontend | React 19 + TypeScript + Vite + Recharts + Tailwind v4 |
-| Backend | Express 5 (CommonJS), porta 3010 |
-| Deploy | Railway (nixpacks) |
-| Process manager local | PM2 |
-| IA | Groq SDK — llama-3.3-70b-versatile |
-| YouTube (privado) | YouTube Analytics API v2 + Data API v3 (OAuth) |
-| YouTube (público) | Innertube (zero quota) + RSS Feed (zero quota) |
-| Instagram | Meta Graph API v19.0 (Reels publishing) |
+|---|---|
+| Frontend | React 19 + TypeScript + Vite |
+| Backend | Express 5 (CommonJS) |
+| Styling | CSS-in-JS inline (estilo terminal retro) |
+| Charts | Recharts |
+| AI Chat | Groq SDK (`llama-3.3-70b-versatile`) |
+| AI SEO | Groq SDK (`llama-3.3-70b-versatile`) |
+| Deploy | Railway (monorepo — serve dist/ + API no mesmo processo) |
+| Auth | Google OAuth 2.0 |
 
 ---
 
-## Arquitetura de dados
-
-```
-YouTube Analytics API (OAuth) → views, watch time, CTR, revenue, traffic sources
-YouTube Data API v3 (API keys) → lista de vídeos públicos (2 unidades/req)
-Innertube (zero quota)         → trending, channel info de fallback
-RSS Feed do YouTube            → fallback de vídeos quando quota cai
-```
-
----
-
-## Estrutura de ficheiros relevantes
+## Estrutura de Ficheiros
 
 ```
 prodbygrillo-dashboard/
-├── server/
-│   ├── index.js              # Express app, middlewares, seed de channel cache
-│   ├── accountManager.js     # Singleton de autenticação — withYouTube / withPublicYouTube
-│   ├── apiError.js           # isQuotaError / sendError helpers
-│   ├── lib/
-│   │   └── innertube.js      # search(), channelInfo(), channelFeed()
-│   └── routes/
-│       ├── analytics.js      # GET /api/analytics, /traffic, /revenue-monthly
-│       ├── videos.js         # GET /api/videos (Data API → RSS fallback)
-│       ├── trending.js       # GET /api/trending (Innertube, 3 queries, 1h cache)
-│       ├── channel.js        # GET /api/channel
-│       ├── audience.js       # GET /api/audience
-│       ├── ai.js             # POST /api/ai/analyze-beat (SSE, Groq)
-│       ├── upload.js         # POST /api/upload (SSE, YouTube upload) + GET /tmp/:filename
-│       ├── instagram.js      # Auth + POST /api/instagram/upload (SSE, Reels)
-│       ├── auth.js           # OAuth flow
-│       └── accounts.js       # Status dos accounts
 ├── src/
+│   ├── App.tsx                    # Root — auth gate, routing, data fetch
 │   ├── pages/
-│   │   ├── Overview.tsx
-│   │   ├── Analytics.tsx
-│   │   ├── Videos.tsx
-│   │   ├── Audience.tsx
-│   │   ├── Revenue.tsx
-│   │   ├── Scheduler.tsx     # Thumbnail builder + upload + análise IA
-│   │   └── Settings.tsx
-│   └── components/
-│       ├── Header.tsx
-│       ├── Sidebar.tsx
-│       ├── StatCard.tsx
-│       ├── VideoTable.tsx
-│       └── scheduler/        # Componentes do Scheduler
-└── CONTEXT.md                # este ficheiro
+│   │   ├── Overview.tsx           # Canal, stats, charts, top vídeos, trending, LAIS
+│   │   ├── Analytics.tsx          # Mini charts + heatmap de views diárias
+│   │   ├── Videos.tsx             # Tabela de vídeos com sort/filter; empty = vinyl art
+│   │   ├── Audience.tsx           # Idade, género, países, dispositivos
+│   │   ├── Revenue.tsx            # Revenue mensal; mostra NOT MONETIZED se não elegível
+│   │   ├── Scheduler.tsx          # Upload + análise SEO de beats + Instagram/TikTok
+│   │   └── Settings.tsx           # Contas OAuth, logout
+│   ├── components/
+│   │   ├── Header.tsx             # Barra topo: título, date range, [YT STUDIO], [LOGOUT]
+│   │   ├── Sidebar.tsx            # Navegação lateral colapsável
+│   │   ├── AIChat.tsx             # LAIS — chat terminal com Groq, streaming SSE
+│   │   ├── VideoTable.tsx         # Tabela de vídeos reutilizável
+│   │   ├── StatCard.tsx           # Card de métrica individual
+│   │   ├── PixelIcons.tsx         # Ícones SVG pixel-art
+│   │   ├── charts/
+│   │   │   ├── ViewsChart.tsx
+│   │   │   ├── TrafficChart.tsx
+│   │   │   ├── AudienceChart.tsx
+│   │   │   └── RevenueChart.tsx
+│   │   └── ui/
+│   │       └── Skeleton.tsx       # SkeletonCard, SkeletonTable
+│   ├── lib/
+│   │   └── api.ts                 # Cliente HTTP — todas as chamadas ao backend
+│   ├── types/
+│   │   └── index.ts               # Tipos TypeScript partilhados
+│   └── utils/
+│       └── format.ts              # fmtNum, fmtSecs, fmtPct, fmtNumFull
+├── server/
+│   ├── index.js                   # Entry point Express — monta rotas, serve dist/
+│   ├── accountManager.js          # Gestão de token OAuth + API keys rotativas
+│   ├── apiError.js                # isQuotaError, sendError helpers
+│   └── routes/
+│       ├── auth.js                # GET /status, /url, /callback, /token-export; POST /logout
+│       ├── accounts.js            # GET /api/accounts/status
+│       ├── channel.js             # GET /api/channel — com fallback innertube + env seed
+│       ├── analytics.js           # GET /api/analytics?range=28d
+│       ├── videos.js              # GET /api/videos
+│       ├── audience.js            # GET /api/audience?range=28d
+│       ├── trending.js            # GET /api/trending — top artistas do mês
+│       ├── ai.js                  # POST /api/ai/chat (LAIS/Groq), /analyze-beat (Groq)
+│       ├── upload.js              # POST /api/upload/youtube; GET /api/upload/tmp/:file
+│       └── instagram.js           # Instagram OAuth + upload de Reels
+├── .env                           # Variáveis locais (nunca commitado)
+├── CONTEXT.md                     # Este ficheiro
+├── package.json
+├── vite.config.ts
+└── tsconfig.json
 ```
 
 ---
 
-## accountManager.js — como funciona
+## Variáveis de Ambiente
 
-Singleton central. Regras de uso:
-- **Nunca** chamar `getAuthClient()` diretamente em rotas novas
-- Usar sempre `withYouTube(fn)` para dados privados/OAuth
-- Usar `withPublicYouTube(fn)` para dados públicos — tenta API keys primeiro, OAuth como fallback
+### Railway (produção)
 
-```js
-// Dados privados (analytics, upload)
-await accountManager.withYouTube(async (auth) => {
-  const ya = google.youtubeAnalytics({ version: 'v2', auth })
-  // ...
-})
-
-// Dados públicos (videos.list, playlistItems)
-await accountManager.withPublicYouTube(async (auth) => {
-  const yt = google.youtube({ version: 'v3', auth })
-  // ...
-})
-```
-
-**Rotação de API keys:** `YT_API_KEY_2`, `YT_API_KEY_3`, ... (env vars). Em quota exceeded, roda automático para a próxima.
+| Variável | Descrição |
+|---|---|
+| `GOOGLE_CREDENTIALS` | JSON das credenciais OAuth (client_id, client_secret, redirect_uris) |
+| `GOOGLE_TOKEN` | Token OAuth persistido em base64 — **remover para forçar re-login** |
+| `GROQ_API_KEY` | Chave Groq para LAIS (chat) e analyze-beat |
+| `GEMINI_API_KEY` | Chave Gemini (não usada — billing bloqueia free tier em todos os projetos disponíveis) |
+| `REDIRECT_URI` | `https://prodbygrillo-dashboard-production.up.railway.app/api/auth/callback` |
+| `CHANNEL_ID` | `UCx5iV1aVpzOVBRMogBoi9_g` |
+| `CHANNEL_NAME` | `Prodbygrillo` |
+| `CHANNEL_HANDLE` | `@prodbygrillo` |
+| `CHANNEL_SUBS` | Subscribers seed (usado quando API quota esgota) |
+| `CHANNEL_VIEWS` | Views seed |
+| `CHANNEL_VIDEOS` | Total vídeos seed |
+| `YT_API_KEY_2/3/4` | API keys públicas rotativas para YouTube Data API |
 
 ---
 
-## Credenciais
+## Rotas da API
 
-| Ficheiro | Uso |
-|----------|-----|
-| `client_secret_1.json` | OAuth credentials (GCP) |
-| `token_1.json` | OAuth token salvo |
-| `.env` → `GROQ_API_KEY` | Groq (IA) |
-| `.env` → `YT_API_KEY_2..N` | API keys públicas (projetos GCP separados!) |
-| `.env` → `GOOGLE_CREDENTIALS` | Para Railway: JSON base64 ou raw do client_secret |
-| `.env` → `GOOGLE_TOKEN` | Para Railway: token OAuth (evita perda no restart) |
-| `.env` → `CHANNEL_ID` | Seed do cache de canal no cold start |
-| `.env` → `META_APP_ID` | Meta app ID (developers.facebook.com) |
-| `.env` → `META_APP_SECRET` | Meta app secret |
-| `.env` → `META_REDIRECT_URI` | OAuth callback URL (ex: https://…/api/instagram/auth/callback) |
-| `.env` → `META_ACCESS_TOKEN` | Long-lived token (60 dias) — Railway env var para persistência |
-| `.env` → `INSTAGRAM_ACCOUNT_ID` | Instagram Business Account ID |
-| `.env` → `PUBLIC_URL` | URL pública do Railway (para Instagram buscar vídeos) |
+### Auth
+| Método | Rota | Descrição |
+|---|---|---|
+| GET | `/api/auth/status` | `{ authenticated: bool }` |
+| GET | `/api/auth/url` | Gera URL OAuth Google |
+| GET | `/api/auth/callback` | Callback OAuth — redireciona para frontend |
+| POST | `/api/auth/logout` | Limpa token + caches |
+| GET | `/api/auth/token-export` | Exporta token em base64 para Railway |
 
----
+### Dados (requerem auth)
+| Método | Rota | Descrição |
+|---|---|---|
+| GET | `/api/channel` | Info do canal (nome, subs, views, videos) |
+| GET | `/api/analytics?range=7d\|28d\|90d\|365d` | Métricas diárias |
+| GET | `/api/videos` | Lista de vídeos com métricas |
+| GET | `/api/audience?range=...` | Idade, género, países, dispositivos |
+| GET | `/api/trending` | Top artistas em type beats no mês atual |
 
-## Endpoints e status
+### AI
+| Método | Rota | Descrição |
+|---|---|---|
+| POST | `/api/ai/chat` | LAIS — chat com dados do canal (Groq SSE) |
+| POST | `/api/ai/analyze-beat` | Análise SEO de beat name (Groq SSE, retorna JSON) |
 
-| Rota | Fonte | Status |
-|------|-------|--------|
-| `GET /api/analytics?range=28d` | YouTube Analytics API | ✅ |
-| `GET /api/analytics/traffic` | YouTube Analytics API | ✅ |
-| `GET /api/analytics/revenue-monthly` | YouTube Analytics API | ✅ |
-| `GET /api/channel` | Data API + Innertube fallback | ✅ |
-| `GET /api/videos` | playlistItems (2u) + RSS fallback | ✅ |
-| `GET /api/trending` | Innertube (zero quota) | ✅ |
-| `GET /api/audience` | YouTube Analytics API | ✅ parcial |
-| `POST /api/ai/analyze-beat` | Groq llama-3.3-70b (SSE) | ✅ |
-| `POST /api/upload/video` | YouTube Data API (SSE) | ✅ |
-| `GET /api/upload/tmp/:filename` | Serve temp video para APIs externas | ✅ |
-| `GET /api/upload/history` | Histórico de uploads | ✅ |
-| `POST /api/upload/history/refresh` | Atualiza views via YT API | ✅ |
-| `DELETE /api/upload/history/:id` | Remove entrada do histórico | ✅ |
-| `GET /api/instagram/auth/url` | Gera URL OAuth Meta | ✅ |
-| `GET /api/instagram/auth/callback` | Recebe code, troca por token longo | ✅ |
-| `GET /api/instagram/auth/status` | Estado da autenticação Instagram | ✅ |
-| `POST /api/instagram/auth/refresh` | Renova token (chamar cada ~50 dias) | ✅ |
-| `POST /api/instagram/auth/logout` | Limpa token | ✅ |
-| `POST /api/instagram/upload` | Publica Reels (SSE) | ✅ |
-| `GET /api/health` | in-process | ✅ |
+### Upload / Instagram
+| Método | Rota | Descrição |
+|---|---|---|
+| POST | `/api/upload/youtube` | Upload de vídeo para YouTube (SSE progress) |
+| GET | `/api/upload/tmp/:filename` | Serve ficheiro temporário (para Instagram) |
+| GET | `/api/instagram/auth/url` | URL OAuth Meta |
+| GET | `/api/instagram/auth/callback` | Callback Meta OAuth |
+| GET | `/api/instagram/status` | Status da conta Instagram |
+| POST | `/api/instagram/upload` | Publica Reel no Instagram (SSE) |
 
 ---
 
-## Innertube — como funciona
-
-API interna do YouTube, zero quota, zero autenticação. Usada em `server/lib/innertube.js`.
-
-```js
-// search(query) → [{ videoId, title, views }]
-// channelInfo(channelId) → { name, handle, subscribers, thumbnail }
-// channelFeed(channelId) → últimos 15 vídeos via RSS
-
-const CTX = { client: { clientName: 'WEB', clientVersion: '2.20240101.00.00', hl: 'en', gl: 'US' } }
-fetch('https://www.youtube.com/youtubei/v1/search', { method: 'POST', body: JSON.stringify({ context: CTX, query }) })
-```
-
-**Limitações:** datas retornam como relativas ("2 months ago"), sem `publishedAfter`, parsing JSON muito aninhado.
-
----
-
-## Sistema de fallback (vídeos)
+## Fluxo de Autenticação
 
 ```
-1. Cache em memória (15 min TTL)
-2. playlistItems.list + videos.list via withPublicYouTube (2 unidades)
-3. Em quota exceeded → RSS Feed (channelFeed) — zero quota, últimos 15 vídeos
-4. Enriquece RSS com Analytics (quota separada — geralmente disponível)
-5. Cache em disco /tmp/videos_cache.json
+Abre dashboard
+    → GET /api/auth/status → { authenticated: false }
+    → Mostra AuthOverlay com botão [CONNECT YOUTUBE CHANNEL]
+    → Clica botão → GET /api/auth/url → abre popup OAuth Google
+    → Utilizador faz login e autoriza
+    → Google redireciona para /api/auth/callback?code=...
+    → Servidor troca code por token → guarda em /tmp/token.json
+    → Redireciona para /?auth=success
+    → Frontend deteta query param → verifica status → autenticado
+    → Carrega: channel, analytics, videos, trending, audience
 ```
 
----
+**Logout:** botão `[LOGOUT]` no Header → POST /api/auth/logout → limpa token + caches → volta ao AuthOverlay.
 
-## Quota da YouTube Data API
-
-| Operação | Custo |
-|----------|-------|
-| `search.list` | 100 unidades 🚨 (não usamos mais) |
-| `channels.list` | 1 unidade |
-| `playlistItems.list` | 1 unidade |
-| `videos.list` | 1 unidade |
-
-**Reset:** 00:00 PST = 08:00 UTC = 05:00 BRT  
-**YouTube Analytics API:** quota separada, mais generosa.
+**GOOGLE_TOKEN no Railway:** se definido, arranca pré-autenticado. Se removido (via `railway variable delete GOOGLE_TOKEN`), arranca sempre na tela de login.
 
 ---
 
-## Armadilhas conhecidas
+## LAIS — Analista do Canal
 
-- `dimensions=month` no Analytics exige dia 1 em **ambas** as datas (startDate e endDate)
-- `let` dentro de `try{}` não é acessível no `catch{}` — inicializar antes do try
-- Todas as API keys do mesmo projeto GCP → mesma quota → esgotam juntas
-- Token OAuth em `/tmp` some no Railway ao reiniciar → usar `GOOGLE_TOKEN` env var
-- `latestBeat` vazio no trending — Innertube retorna datas relativas, não absolutas
-
----
-
-## AI — Scheduler (ai.js)
-
-`POST /api/ai/analyze-beat` com `{ beatName }` → stream SSE com JSON progressivo.
-
-Modelo: `llama-3.3-70b-versatile` via Groq.  
-Retorna: `seoScore`, `optimizedTitle`, `description`, `tags`, `hashtags`, `thumbnail`, `postingSchedule`, `trendingComparison`.
-
-Sanitização especial: o LLaMA às vezes emite `\n` literal dentro de strings JSON — `sanitizeJsonStrings()` corrige isso antes de parsear.
+- **Componente:** `src/components/AIChat.tsx`
+- **Rota backend:** `POST /api/ai/chat`
+- **Modelo:** Groq `llama-3.3-70b-versatile`
+- **Contexto enviado:** info do canal, analytics diários (últimos 7 dias + tendência vs semana anterior), fontes de tráfego, top 10 vídeos, histórico da conversa (últimas 6 mensagens)
+- **Streaming:** SSE — frontend constrói a resposta caractere a caractere
+- **Tom:** Português de Portugal, direto, baseado nos dados reais
 
 ---
 
-## Armadilha Instagram
+## Scheduler / Upload de Beats
 
-- Token longo dura 60 dias — renovar via `POST /api/instagram/auth/refresh` antes de expirar
-- Instagram não aceita upload direto — precisa de URL pública → `PUBLIC_URL` tem de estar definida no Railway
-- `video_url` tem de ser acessível pela internet (não localhost) durante o processamento
-- Status codes do container: `IN_PROGRESS` → `FINISHED` (ok) | `ERROR` / `EXPIRED` (falhou)
+Fluxo do Scheduler (`src/pages/Scheduler.tsx`):
 
----
-
-## Próximos passos
-
-### Imediato
-1. **Preencher env vars Meta** — `META_APP_ID`, `META_APP_SECRET` depois de criar o app em developers.facebook.com. Definir `META_REDIRECT_URI` e `PUBLIC_URL` no Railway.
-2. **Conectar Instagram na UI** — Scheduler.tsx não tem ainda o flow de autenticação + upload Instagram. Implementar botão "Publicar no Instagram" que chama `POST /api/instagram/upload`.
-3. **Atualizar `GOOGLE_TOKEN` no Railway** — se ainda não feito, exportar via `GET /api/auth/token-export` e definir no Railway.
-
-### Médio prazo
-4. **TikTok backend** — app submetido para aprovação. Quando aprovado: implementar `server/routes/tiktok.js` com OAuth TikTok + upload via Content Posting API.
-5. **TikTok UI** — botão "Publicar no TikTok" no Scheduler.tsx.
-
-### Longo prazo
-6. **BeatStars integration** — API pública limitada, pode precisar de scraping ou link manual.
-7. **Crescer o canal** — meta: 1.000 subs + 4.000h watch time para monetizar.
+1. **Análise SEO** — insere nome do beat → `POST /api/ai/analyze-beat` → Groq gera JSON com título otimizado, tags, hashtags, descrição, horário ideal, conceito de thumbnail
+2. **Geração de thumbnail** — Canvas API (browser) gera imagem 1280×720 com o conceito sugerido
+3. **Upload YouTube** — `POST /api/upload/youtube` via SSE com progresso em tempo real
+4. **Publicação Instagram** — usa vídeo em `/tmp` + caption gerada pela AI → `POST /api/instagram/upload`
+5. **TikTok** — UI presente mas desativado (aguarda aprovação no TikTok Developer Portal)
 
 ---
 
-## Como correr localmente
+## Deploy (Railway)
 
-```powershell
-cd "C:\Users\Prodbygrillo\Desktop\prodbygrillo-dashboard"
+```bash
+# Deploy
+railway up --detach
 
-# Instalar dependências (se necessário)
-npm install
-cd server && npm install && cd ..
+# Logs
+railway logs
 
-# Desenvolvimento (Vite + Express em paralelo)
-npm run dev:all
+# Variáveis
+railway variable set KEY=value
+railway variable delete KEY
+railway variable list --kv
 
-# Ou via PM2
-pm2 start ecosystem.config.js
+# Exportar token OAuth após login (para persistir no Railway)
+curl https://prodbygrillo-dashboard-production.up.railway.app/api/auth/token-export
+# copia o campo "base64" → railway variable set GOOGLE_TOKEN=<valor>
 ```
 
-Frontend: http://localhost:5173  
-Backend: http://localhost:3010
+**URL produção:** `https://prodbygrillo-dashboard-production.up.railway.app`
+
+---
+
+## Comportamento com Quota YouTube Esgotada
+
+Reset diário às **08:00 UTC / 05:00 BRT**.
+
+| Rota | Comportamento quando quota esgota |
+|---|---|
+| `/api/channel` | API key pública → Innertube → cache disco → seed env vars |
+| `/api/analytics` | Retorna erro → frontend mostra skeleton |
+| `/api/videos` | Retorna null → frontend mostra tela vinyl/piano animada |
+| `/api/trending` | Usa API keys rotativas (YT_API_KEY_2/3/4) |
+| `/api/audience` | Retorna erro → frontend mostra "NO DATA" |
+
+---
+
+## Notas Importantes
+
+- **Zero mock data:** todos os dados vêm da API após login. Nenhum dado gerado ou hardcoded visível ao utilizador.
+- **OAuth scopes:** `youtube.readonly`, `yt-analytics.readonly`, `yt-analytics-monetary.readonly` — não-sensíveis, sem necessidade de verificação Google. `youtube.upload` foi removido.
+- **Gemini bloqueado:** todas as chaves Gemini disponíveis pertencem a projetos GCP com billing ativo, que zera o free tier (`limit: 0`). LAIS usa Groq enquanto não houver chave de projeto sem billing.
+- **Instagram:** implementado mas requer credenciais Meta (`META_APP_ID`, `META_APP_SECRET`, `META_ACCESS_TOKEN`, `INSTAGRAM_ACCOUNT_ID`).
+- **Estilo visual:** terminal retro monocromático. Fonte Courier New. Cores principais: `#00ff00` (accent), fundo `#0a0a0a`, cards `#0d0d0d`. Sem emojis, sem gradientes.
