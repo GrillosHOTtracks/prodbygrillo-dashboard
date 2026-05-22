@@ -253,6 +253,12 @@ export function Scheduler() {
   // ── History refresh trigger
   const [histRefreshKey, setHistRefreshKey] = useState(0)
 
+  // ── TikTok state
+  const [ttCaption, setTtCaption]     = useState('')
+  const [ttPhase, setTtPhase]         = useState<'idle' | 'uploading' | 'done' | 'error'>('idle')
+  const [ttLink, setTtLink]           = useState('')
+  const [ttError, setTtError]         = useState('')
+
   // ── Instagram state
   const [igStatus, setIgStatus]       = useState<IgStatus | null>(null)
   const [igCaption, setIgCaption]     = useState('')
@@ -283,6 +289,7 @@ export function Scheduler() {
     if (!analysis) return
     const firstLine = analysis.description.split('\n').find(l => l.trim()) || ''
     setIgCaption(firstLine.trim())
+    setTtCaption(firstLine.trim())
   }, [analysis])
 
   const connectInstagram = useCallback(async () => {
@@ -978,10 +985,110 @@ export function Scheduler() {
             )}
           </div>
 
+          {/* ══ TIKTOK ══ */}
+          <div style={panel}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+              <p style={{ color: '#ff0050', fontSize: '11px', letterSpacing: '1px', margin: 0 }}>
+                ┌─ PUBLICAR NO TIKTOK
+              </p>
+            </div>
+
+            {/* Not connected / pending approval */}
+            {ttPhase === 'idle' && (
+              <>
+                <div style={{ textAlign: 'center', padding: '12px 0 16px' }}>
+                  <p style={{ color: '#555555', fontSize: '10px', margin: '0 0 12px', letterSpacing: '1px' }}>
+                    CONTA TIKTOK NÃO CONECTADA
+                  </p>
+                  <button
+                    disabled
+                    style={{ padding: '10px 24px', backgroundColor: '#0d0005', color: '#441122', border: '1px solid #220011', cursor: 'not-allowed', fontFamily: 'Courier New, monospace', fontSize: '12px', fontWeight: 'bold', letterSpacing: '1px' }}
+                  >[ CONECTAR TIKTOK ]</button>
+                  <p style={{ color: '#2a2a2a', fontSize: '10px', margin: '10px 0 0' }}>
+                    Aguarda aprovação do TikTok Developer Portal
+                  </p>
+                </div>
+
+                {!videoFile && (
+                  <p style={{ color: '#444444', fontSize: '10px', margin: '0 0 12px', letterSpacing: '1px' }}>
+                    Seleciona o arquivo de vídeo na secção YouTube acima para publicar no TikTok.
+                  </p>
+                )}
+
+                <div style={{ marginBottom: '10px' }}>
+                  <p style={label10}>LEGENDA</p>
+                  <textarea
+                    value={ttCaption}
+                    onChange={e => setTtCaption(e.target.value)}
+                    rows={3}
+                    placeholder="Legenda do TikTok..."
+                    style={{ width: '100%', backgroundColor: '#111111', border: '1px solid #2a2a2a', color: '#c0c0c0', fontSize: '11px', padding: '8px', fontFamily: 'Courier New, monospace', outline: 'none', resize: 'vertical', boxSizing: 'border-box' }}
+                  />
+                </div>
+
+                {analysis.hashtags.length > 0 && (
+                  <div style={{ marginBottom: '14px' }}>
+                    <p style={label10}>HASHTAGS (adicionadas automaticamente)</p>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                      {analysis.hashtags.map((h, i) => <Chip key={i} text={h} accent />)}
+                    </div>
+                  </div>
+                )}
+
+                <button
+                  disabled
+                  style={{
+                    width: '100%', padding: '12px',
+                    backgroundColor: '#0d0005', color: '#441122',
+                    border: '1px solid #220011', cursor: 'not-allowed',
+                    fontFamily: 'Courier New, monospace', fontSize: '13px',
+                    fontWeight: 'bold', letterSpacing: '2px',
+                  }}
+                >[ PUBLICAR NO TIKTOK ]</button>
+              </>
+            )}
+
+            {/* Error state */}
+            {ttPhase === 'error' && (
+              <>
+                <p style={{ color: '#ff4400', fontSize: '10px', margin: '0 0 10px' }}>⚠ {ttError}</p>
+                <button
+                  onClick={() => { setTtPhase('idle'); setTtError('') }}
+                  style={retro}
+                  onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = '#c0c0c0' }}
+                  onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = '#707070' }}
+                >[ TENTAR NOVAMENTE ]</button>
+              </>
+            )}
+
+            {/* Done */}
+            {ttPhase === 'done' && (
+              <div style={{ textAlign: 'center', padding: '16px 0' }}>
+                <p style={{ color: '#ff0050', fontSize: '14px', fontWeight: 'bold', letterSpacing: '2px', margin: '0 0 10px' }}>
+                  ✓ PUBLICADO NO TIKTOK
+                </p>
+                {ttLink && (
+                  <a href={ttLink} target="_blank" rel="noreferrer"
+                     style={{ color: '#707070', fontSize: '12px', letterSpacing: '1px' }}>
+                    ver no tiktok ↗
+                  </a>
+                )}
+                <div style={{ marginTop: '12px' }}>
+                  <button
+                    onClick={() => { setTtPhase('idle'); setTtLink(''); setTtError('') }}
+                    style={retro}
+                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = '#c0c0c0' }}
+                    onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = '#707070' }}
+                  >[ PUBLICAR OUTRO ]</button>
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* ── RESET ── */}
           <div style={{ textAlign: 'center' }}>
             <button
-              onClick={() => { setStatus('idle'); setAnalysis(null); setStreamText(''); setBeatName(''); setThumbDataUrl(null); setUploadPhase('idle'); setVideoFile(null); setIgPhase('idle'); setIgProgress(0); setIgPermalink(''); setIgError('') }}
+              onClick={() => { setStatus('idle'); setAnalysis(null); setStreamText(''); setBeatName(''); setThumbDataUrl(null); setUploadPhase('idle'); setVideoFile(null); setIgPhase('idle'); setIgProgress(0); setIgPermalink(''); setIgError(''); setTtPhase('idle'); setTtCaption(''); setTtLink(''); setTtError('') }}
               style={retro}
               onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = '#c0c0c0' }}
               onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = '#707070' }}
