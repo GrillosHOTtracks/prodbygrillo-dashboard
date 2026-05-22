@@ -58,24 +58,65 @@ function buildChatPrompt(ctx, history, question) {
   return prompt
 }
 
-// Replaces bare control chars inside JSON string values (LLaMA outputs literal \n in strings)
+// Fixes bare control chars inside JSON string values and validates \uXXXX escapes.
+// Uses index-based iteration so \uXXXX is handled atomically (no per-char flag drift).
 function sanitizeJsonStrings(raw) {
-  let result = ''
+  let result   = ''
   let inString = false
-  let escaped = false
-  for (let i = 0; i < raw.length; i++) {
+  let i        = 0
+
+  while (i < raw.length) {
     const ch = raw[i]
-    if (escaped) { result += ch; escaped = false; continue }
-    if (ch === '\\' && inString) { result += ch; escaped = true; continue }
-    if (ch === '"') { inString = !inString; result += ch; continue }
-    if (inString) {
-      if (ch === '\n') { result += '\\n'; continue }
-      if (ch === '\r') { result += '\\r'; continue }
-      if (ch === '\t') { result += '\\t'; continue }
-      if (ch.charCodeAt(0) < 0x20) continue
+
+    if (!inString) {
+      result += ch
+      if (ch === '"') inString = true
+      i++
+      continue
     }
+
+    // ── Inside a JSON string value ──────────────────────────────────────────
+    if (ch === '\\') {
+      const next = raw[i + 1]
+
+      if (next === '"' || next === '\\' || next === '/' ||
+          next === 'b' || next === 'f'  || next === 'n' ||
+          next === 'r' || next === 't') {
+        result += ch + next      // valid single-char escape — pass through
+        i += 2
+        continue
+      }
+
+      if (next === 'u') {
+        const hex = raw.slice(i + 2, i + 6)
+        if (/^[0-9a-fA-F]{4}$/.test(hex)) {
+          result += raw.slice(i, i + 6)   // valid \uXXXX — pass through intact
+          i += 6
+        } else {
+          result += '\\\\'                // malformed \u — escape the backslash
+          i++                             // leave 'u' + rest to be re-processed
+        }
+        continue
+      }
+
+      // Bare or unknown backslash — escape it so JSON.parse doesn't choke
+      result += '\\\\'
+      i++
+      continue
+    }
+
+    if (ch === '"') { result += ch; inString = false; i++; continue }
+
+    // Bare control characters — must be escaped inside JSON strings
+    if (ch === '\n') { result += '\\n'; i++; continue }
+    if (ch === '\r') { result += '\\r'; i++; continue }
+    if (ch === '\t') { result += '\\t'; i++; continue }
+    if (ch.charCodeAt(0) < 0x20) { i++; continue }  // strip other controls
+
     result += ch
+    i++
   }
+
   return result
 }
 
