@@ -233,9 +233,6 @@ export function Scheduler() {
   const [igPermalink, setIgPermalink] = useState('')
   const [igError, setIgError]         = useState('')
 
-  // ── TikTok
-  const [ttCaption, setTtCaption] = useState('')
-
   // ── History
   const [histRefreshKey, setHistRefreshKey] = useState(0)
 
@@ -258,7 +255,6 @@ export function Scheduler() {
     if (!analysis) return
     const firstLine = analysis.description.split('\n').find(l => l.trim()) || ''
     setIgCaption(firstLine.trim())
-    setTtCaption(firstLine.trim())
   }, [analysis])
 
   // Handle video selection — extract beat name + auto-trigger analysis
@@ -476,7 +472,7 @@ export function Scheduler() {
     setEditTitle(''); setEditDesc(''); setEditTags(''); setEditHashtags(''); setScheduledAt('')
     setThumbDataUrl(null); setUploadPhase('idle'); setUploadVideoId(null); setUploadError('')
     setIgPhase('idle'); setIgProgress(0); setIgPermalink(''); setIgError('')
-    setTtCaption(''); setPublishedYt(null); setPublishedIg(null)
+    setPublishedYt(null); setPublishedIg(null)
   }
 
   const showResults = aiStatus === 'done' && analysis !== null
@@ -948,25 +944,16 @@ export function Scheduler() {
           </div>
 
           {/* ── TikTok (disabled) ── */}
-          <div style={{ ...panel, opacity: 0.5 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-              <p style={{ color: '#ff0050', fontSize: '11px', letterSpacing: '1px', margin: 0 }}>┌─ PUBLICAR NO TIKTOK</p>
-            </div>
-            <div style={{ textAlign: 'center', padding: '14px 0' }}>
-              <p style={{ color: '#555555', fontSize: '10px', margin: '0 0 10px', letterSpacing: '1px' }}>CONTA TIKTOK NÃO CONECTADA</p>
-              <button disabled style={{ padding: '10px 24px', backgroundColor: '#0d0005', color: '#441122', border: '1px solid #220011', cursor: 'not-allowed', fontFamily: 'Courier New, monospace', fontSize: '12px', fontWeight: 'bold', letterSpacing: '1px' }}>
-                [ CONECTAR TIKTOK ]
+          <div style={{ ...panel, opacity: 0.45 }}>
+            <p style={{ color: '#ff0050', fontSize: '11px', letterSpacing: '1px', margin: '0 0 12px' }}>┌─ PUBLICAR NO TIKTOK</p>
+            <div style={{ textAlign: 'center', padding: '12px 0' }}>
+              <button disabled style={{ padding: '10px 28px', backgroundColor: '#0d0005', color: '#441122', border: '1px solid #220011', cursor: 'not-allowed', fontFamily: 'Courier New, monospace', fontSize: '12px', fontWeight: 'bold', letterSpacing: '1px' }}>
+                [ PUBLICAR NO TIKTOK ]
               </button>
-              <p style={{ color: '#2a2a2a', fontSize: '10px', margin: '8px 0 0' }}>Aguarda aprovação do TikTok Developer Portal</p>
+              <p style={{ color: '#2a2a2a', fontSize: '10px', margin: '10px 0 0', letterSpacing: '1px' }}>
+                Aguarda aprovação do TikTok Developer Portal
+              </p>
             </div>
-            <div style={{ marginBottom: '10px' }}>
-              <p style={dim}>LEGENDA</p>
-              <textarea value={ttCaption} onChange={e => setTtCaption(e.target.value)} rows={2} disabled
-                style={{ ...fieldStyle, resize: 'vertical', opacity: 0.4 }} placeholder="Legenda do TikTok..." />
-            </div>
-            <button disabled style={{ width: '100%', padding: '12px', backgroundColor: '#0d0005', color: '#441122', border: '1px solid #220011', cursor: 'not-allowed', fontFamily: 'Courier New, monospace', fontSize: '13px', fontWeight: 'bold', letterSpacing: '2px' }}>
-              [ PUBLICAR NO TIKTOK ]
-            </button>
           </div>
         </>
       )}

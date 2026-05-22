@@ -113,13 +113,14 @@ export function ThumbnailBuilder({ beatName, artists, onReady }: Props) {
   }
 
   function renderText(ctx: CanvasRenderingContext2D) {
-    const tx = 800, maxW = 440
+    const cx   = 1028  // center of right half (768–1280)
+    const maxW = 460
 
-    ctx.textAlign    = 'left'
-    ctx.textBaseline = 'top'
+    ctx.textAlign    = 'center'
+    ctx.textBaseline = 'alphabetic'
 
-    // Beat name — wrap into lines
-    ctx.font = 'bold 86px Impact, "Arial Black", sans-serif'
+    // Beat name — wrap to max 3 lines
+    ctx.font = 'bold 100px Impact, "Arial Black", sans-serif'
     const words = beatName.toUpperCase().replace(/[()]/g, '').split(' ')
     const lines: string[] = []
     let line = ''
@@ -131,24 +132,33 @@ export function ThumbnailBuilder({ beatName, artists, onReady }: Props) {
     if (line) lines.push(line)
     const display = lines.slice(0, 3)
 
-    ctx.fillStyle = '#ffffff'
-    display.forEach((l, i) => ctx.fillText(l, tx, 180 + i * 94, maxW))
+    const LINE_H  = 108
+    const TYPE_H  = 64
+    const totalH  = display.length * LINE_H + TYPE_H + 40
+    const startY  = Math.round((720 - totalH) / 2) + LINE_H
+
+    // Drop shadow pass
+    ctx.shadowColor = 'rgba(0,0,0,0.85)'
+    ctx.shadowBlur  = 18
+    ctx.fillStyle   = '#ffffff'
+    display.forEach((l, i) => ctx.fillText(l, cx, startY + i * LINE_H, maxW))
 
     // TYPE BEAT
-    const tyY = 180 + display.length * 94 + 18
+    const tyY = startY + display.length * LINE_H + 24
     ctx.fillStyle = '#f5e040'
-    ctx.font      = 'bold 50px Impact, "Arial Black", sans-serif'
-    ctx.fillText('TYPE BEAT', tx, tyY, maxW)
+    ctx.font      = 'bold 58px Impact, "Arial Black", sans-serif'
+    ctx.fillText('TYPE BEAT', cx, tyY, maxW)
 
-    // Yellow separator bar
-    ctx.fillStyle = '#f5e040'
-    ctx.fillRect(tx, tyY + 66, 210, 4)
+    // Yellow bar below TYPE BEAT
+    ctx.shadowBlur = 0
+    ctx.fillStyle  = '#f5e040'
+    ctx.fillRect(cx - 90, tyY + 14, 180, 5)
 
-    // Footer
+    // Credit — "prodbygrillo" only, no "prod."
     ctx.textBaseline = 'bottom'
-    ctx.fillStyle    = 'rgba(255,255,255,0.38)'
-    ctx.font         = '22px "Courier New", monospace'
-    ctx.fillText('prod. prodbygrillo', tx, 704)
+    ctx.fillStyle    = 'rgba(255,255,255,0.55)'
+    ctx.font         = 'bold 22px "Courier New", monospace'
+    ctx.fillText('prodbygrillo', cx, 710, maxW)
   }
 
   function exportCanvas(canvas: HTMLCanvasElement) {

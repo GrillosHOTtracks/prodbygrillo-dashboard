@@ -153,8 +153,8 @@ Return ONLY valid JSON, no markdown, no extra text. Use this exact structure:
 
 {
   "seoScore": <integer 0-100>,
-  "bpm": <estimated BPM as integer, inferred from beat name, mood, and genre cues>,
-  "key": "<estimated musical key, e.g. Am, Gm, F#m, C major — inferred from name and vibe>",
+  "bpm": <exact BPM as integer ONLY if explicitly stated in the beat name (e.g. "Hard 140bpm Beat" → 140) — otherwise return null>,
+  "key": "<exact musical key ONLY if explicitly stated in the beat name (e.g. "Am Beat", "G Minor Drill") — otherwise return null>",
   "titleAnalysis": {
     "score": <integer 0-100>,
     "charCount": <character count of the original beat name>,
@@ -166,7 +166,7 @@ Return ONLY valid JSON, no markdown, no extra text. Use this exact structure:
       "optimized alternative title 3"
     ]
   },
-  "optimizedTitle": "full optimized YouTube title (max 70 chars)",
+  "optimizedTitle": "YouTube title within 70 chars that maximizes reach — always include [FREE], top 2-3 matching artist names joined with x, genre keyword, 'Type Beat', and year. Example: '[FREE] Drake x PartyNextDoor x Loe Shimmy Type Beat 2026'. Front-load the most searchable artist name.",
   "description": "<FULL DESCRIPTION USING THE TEMPLATE ABOVE — single string, \\n for each line break>",
   "tags": ["tag1", "tag2", "tag3", "tag4", "tag5", "tag6", "tag7", "tag8", "tag9", "tag10", "tag11", "tag12", "tag13", "tag14", "tag15"],
   "hashtags": ["#hashtag1", "#hashtag2", "#hashtag3", "#hashtag4", "#hashtag5", "#hashtag6", "#hashtag7", "#hashtag8", "#hashtag9", "#hashtag10"],
