@@ -58,8 +58,8 @@ router.get('/', async (req, res) => {
       const searches = await Promise.all(
         queries.map(q =>
           youtube.search.list({
-            part: ['id', 'snippet'], q, type: ['video'],
-            order: 'relevance', publishedAfter, maxResults: 50,
+            part: ['id', 'snippet'], q, type: 'video',
+            publishedAfter, maxResults: 50,
           }).catch(err => {
             if (isQuotaError(err)) throw err
             return { data: { items: [] } }
