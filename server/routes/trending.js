@@ -49,16 +49,17 @@ router.get('/', async (req, res) => {
     const result = await accountManager.withPublicYouTube(async (auth) => {
       const youtube = google.youtube({ version: 'v3', auth })
 
-      const now            = new Date()
-      const publishedAfter = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString()
+      const now  = new Date()
+      const year = now.getUTCFullYear()
+      // Format without milliseconds — some API versions reject .000Z
+      const publishedAfter = `${year}-${String(now.getUTCMonth() + 1).padStart(2, '0')}-01T00:00:00Z`
 
-      const year = new Date().getFullYear()
       const queries = [`type beat ${year}`, `free type beat ${year}`, `trap type beat ${year}`]
 
       const searches = await Promise.all(
         queries.map(q =>
           youtube.search.list({
-            part: ['id', 'snippet'], q, type: 'video',
+            part: ['id', 'snippet'], q, type: ['video'],
             publishedAfter, maxResults: 50,
           }).catch(err => {
             if (isQuotaError(err)) throw err
