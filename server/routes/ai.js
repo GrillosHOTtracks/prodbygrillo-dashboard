@@ -198,16 +198,16 @@ router.post('/analyze-beat', async (req, res) => {
   }
 })
 
-// POST /api/ai/chat — Groq llama-3.3-70b, SSE streaming
+// POST /api/ai/chat — Gemini 2.0 Flash, SSE streaming
 router.post('/chat', async (req, res) => {
   const { question, context, history } = req.body
   if (!question || typeof question !== 'string' || !question.trim()) {
     return res.status(400).json({ error: 'question is required' })
   }
 
-  const apiKey = process.env.GROQ_API_KEY
+  const apiKey = process.env.GEMINI_API_KEY
   if (!apiKey) {
-    return res.status(503).json({ error: 'GROQ_API_KEY não configurada no .env', code: 'NO_API_KEY' })
+    return res.status(503).json({ error: 'GEMINI_API_KEY não configurada', code: 'NO_API_KEY' })
   }
 
   res.setHeader('Content-Type', 'text/event-stream')
@@ -219,18 +219,14 @@ router.post('/chat', async (req, res) => {
   const send = (data) => { try { res.write(`data: ${JSON.stringify(data)}\n\n`) } catch {} }
 
   try {
-    const client = new Groq({ apiKey })
+    const genAI = new GoogleGenerativeAI(apiKey)
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' })
     const prompt = buildChatPrompt(context, history, question.trim())
 
-    const stream = await client.chat.completions.create({
-      model:      'llama-3.3-70b-versatile',
-      max_tokens: 1024,
-      stream:     true,
-      messages:   [{ role: 'user', content: prompt }],
-    })
+    const result = await model.generateContentStream(prompt)
 
-    for await (const chunk of stream) {
-      const text = chunk.choices[0]?.delta?.content || ''
+    for await (const chunk of result.stream) {
+      const text = chunk.text()
       if (text) send({ text })
     }
 
@@ -238,7 +234,11 @@ router.post('/chat', async (req, res) => {
     res.end()
   } catch (err) {
     console.error('[AI/chat] error:', err.message)
-    send({ error: err.message })
+    if (/quota|429|limit/i.test(err.message)) {
+      send({ text: '\n\n> LAIS: quota do Gemini atingida. Tenta novamente mais tarde.' })
+    } else {
+      send({ error: err.message })
+    }
     res.write('data: [DONE]\n\n')
     res.end()
   }
