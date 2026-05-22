@@ -81,22 +81,56 @@ router.post('/publish', upload.single('audio'), async (req, res) => {
 
     // Accept cookies if dialog appears
     try {
-      await page.waitForSelector('[data-testid="accept-cookies"], .cookie-accept, #onetrust-accept-btn-handler', { timeout: 5000 })
+      await page.waitForSelector(
+        '[data-testid="accept-cookies"], .cookie-accept, #onetrust-accept-btn-handler, button[aria-label*="cookie" i], button[aria-label*="accept" i]',
+        { timeout: 5000 }
+      )
       await page.click('[data-testid="accept-cookies"], .cookie-accept, #onetrust-accept-btn-handler')
     } catch {}
 
-    await page.waitForSelector('input[name="email"], input[type="email"]')
-    await page.type('input[name="email"], input[type="email"]', email, { delay: 40 })
-    await page.type('input[name="password"], input[type="password"]', password, { delay: 40 })
+    // Fill email — try multiple selectors
+    const emailSel = 'input[name="email"], input[type="email"], input[placeholder*="email" i], input[autocomplete="email"]'
+    await page.waitForSelector(emailSel, { timeout: 15000 })
+    await page.click(emailSel)
+    await page.type(emailSel, email, { delay: 50 })
+
+    // BeatStars may be single-step or two-step (email → Continue → password)
+    // Try pressing Enter or clicking Continue/Next first; if a password field
+    // already exists we skip straight to filling it.
+    const pwSel = 'input[name="password"], input[type="password"], input[placeholder*="password" i], input[autocomplete="current-password"]'
+    const pwAlreadyVisible = await page.$(pwSel) !== null
+
+    if (!pwAlreadyVisible) {
+      // Two-step: click Continue / Next / Submit on the email step
+      const continueSel = 'button[type="submit"], button[data-testid*="continue" i], button[data-testid*="next" i], button:has-text("Continue"), button:has-text("Next")'
+      try {
+        await page.click(continueSel)
+      } catch {
+        // Fallback: press Enter on the email field
+        await page.keyboard.press('Enter')
+      }
+      // Wait for password field to appear (up to 10s)
+      await page.waitForSelector(pwSel, { timeout: 10000 })
+    }
+
+    await page.click(pwSel)
+    await page.type(pwSel, password, { delay: 50 })
+
+    // Submit login form
     await Promise.all([
-      page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }),
-      page.click('button[type="submit"]'),
+      page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {}),
+      page.keyboard.press('Enter'),
     ])
 
-    // Verify login succeeded by checking URL
+    // Give SPA a moment to settle
+    await new Promise(r => setTimeout(r, 2000))
+
+    // Verify login succeeded
     const afterLoginUrl = page.url()
     if (afterLoginUrl.includes('/login') || afterLoginUrl.includes('/signin')) {
-      sse(res, { status: 'ERROR', error: 'Login falhou — verifica BEATSTARS_EMAIL e BEATSTARS_PASSWORD' })
+      // Dump a screenshot path for debugging
+      try { await page.screenshot({ path: '/tmp/bs_login_fail.png' }) } catch {}
+      sse(res, { status: 'ERROR', error: 'Login falhou — verifica BEATSTARS_EMAIL e BEATSTARS_PASSWORD no Railway' })
       res.write('data: [DONE]\n\n')
       return res.end()
     }
