@@ -1,0 +1,84 @@
+data: {"text":"{\n  \"seoScore\": 80,\n  \"titleAnalysis\": {\n    \"score\": 70,\n  "}
+
+data: {"text":"  \"charCount\": 15,\n    \"strengths\": [\"includes artist name\","}
+
+data: {"text":" \"specifies genre\"],\n    \"issues\": [\"too short\", \"lacks desc"}
+
+data: {"text":"riptive words\"],\n    \"alternatives\": [\n      \"Loe Shimmy x S"}
+
+data: {"text":"ummer Walker Type Beat 2026\",\n      \"Melodic Loe Shimmy Inst"}
+
+data: {"text":"rumental\",\n      \"Loe Shimmy Inspired RnB Plugg Type Beat\"\n "}
+
+data: {"text":"   ]\n  },\n  \"optimizedTitle\": \"Loe Shimmy x Plugg Type Beat\""}
+
+data: {"text":",\n  \"description\": \"This Loe Shimmy type beat is a melodic a"}
+
+data: {"text":"nd atmospheric instrumental, perfect for artists looking for"}
+
+data: {"text":" a smooth and catchy sound. It features a mix of RnB and Plu"}
+
+data: {"text":"ggnB elements, with a focus on soulful melodies and a drivin"}
+
+data: {"text":"g beat.\\n\\nThe vibe of this instrumental is reminiscent of a"}
+
+data: {"text":"rtists like Summer Walker, 6LACK, and Bryson Tiller, and wou"}
+
+data: {"text":"ld be a great fit for singers and rappers looking to create "}
+
+data: {"text":"a hit single. The instrumental has a dark and moody tone, wi"}
+
+data: {"text":"th a mix of synthesizers and 808 drums that create a unique "}
+
+data: {"text":"and captivating sound.\\n\\nIf you're interested in using this"}
+
+data: {"text":" beat for your next project, please contact me at [insert em"}
+
+data: {"text":"ail] for licensing information. You can also follow me on so"}
+
+data: {"text":"cial media for more updates and behind-the-scenes content.\","}
+
+data: {"text":"\n  \"tags\": [\"Loe Shimmy\", \"PluggnB\", \"RnB\", \"Type Beat\", \"In"}
+
+data: {"text":"strumental\", \"Melodic\", \"Atmospheric\", \"Summer Walker\", \"6LA"}
+
+data: {"text":"CK\", \"Bryson Tiller\", \"Beat\", \"Music\", \"Production\", \"Licens"}
+
+data: {"text":"ing\"],\n  \"hashtags\": [\"#LoeShimmy\", \"#PluggnB\", \"#RnB\", \"#Ty"}
+
+data: {"text":"peBeat\", \"#Instrumental\", \"#Melodic\", \"#Atmospheric\", \"#Summ"}
+
+data: {"text":"erWalker\", \"#6LACK\", \"#BrysonTiller\", \"#Beat\", \"#Music\", \"#P"}
+
+data: {"text":"roduction\", \"#Licensing\"],\n  \"thumbnail\": {\n    \"concept\": \""}
+
+data: {"text":"a dark and moody cityscape at night, with a silhouette of a "}
+
+data: {"text":"person in the foreground\",\n    \"colors\": [\"#2c3e50\", \"#8e44a"}
+
+data: {"text":"d\", \"#1abc9c\"],\n    \"mainText\": \"LOE SHIMMY TYPE BEAT\",\n    "}
+
+data: {"text":"\"subText\": \"pluggnb instrumental\",\n    \"style\": \"dark\"\n  },\n"}
+
+data: {"text":"  \"postingSchedule\": {\n    \"bestDay\": \"Wednesday\",\n    \"best"}
+
+data: {"text":"Time\": \"20:00\",\n    \"timezone\": \"BRT\",\n    \"reasoning\": \"bas"}
+
+data: {"text":"ed on data from the RnB and PluggnB niche, Wednesday evening"}
+
+data: {"text":"s tend to have higher engagement and viewership\"\n  },\n  \"tre"}
+
+data: {"text":"ndingComparison\": {\n    \"matchingArtists\": [\"Summer Walker\","}
+
+data: {"text":" \"6LACK\", \"Bryson Tiller\"],\n    \"vibes\": [\"melodic\", \"atmosp"}
+
+data: {"text":"heric\", \"moody\"],\n    \"uniquenessScore\": 60,\n    \"competitio"}
+
+data: {"text":"nLevel\": \"medium\",\n    \"suggestion\": \"to stand out, consider"}
+
+data: {"text":" adding a unique twist to the instrumental, such as a unexpe"}
+
+data: {"text":"cted melody or sound design element\"\n  }\n}"}
+
+data: [DONE]
+

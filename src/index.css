@@ -1,0 +1,190 @@
+@import "tailwindcss";
+
+/* ═══════════════════════════════════════════════════════
+   DESIGN TOKENS
+═══════════════════════════════════════════════════════ */
+:root {
+  --bg:            #0a0a0a;
+  --bg-surface:    #0e0e0e;
+  --bg-card:       #121212;
+  --bg-hover:      #181818;
+
+  --accent:        #00ff00;
+  --accent-dim:    #00cc00;
+  --accent-muted:  rgba(0, 255, 0, 0.10);
+  --accent-border: rgba(0, 255, 0, 0.22);
+
+  --text:          #c0c0c0;
+  --text-dim:      #666666;
+  --text-faint:    #3a3a3a;
+  --text-bright:   #e8e8e8;
+
+  --border:        #222222;
+  --border-bright: #404040;
+
+  --glow-xs: 0 0  6px rgba(0, 255, 0, 0.12);
+  --glow-sm: 0 0 12px rgba(0, 255, 0, 0.18);
+  --glow-md: 0 0 24px rgba(0, 255, 0, 0.22);
+  --glow-lg: 0 0 48px rgba(0, 255, 0, 0.28);
+
+  --ease:      cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-out:  cubic-bezier(0, 0, 0.2, 1);
+  --t-fast:    0.15s;
+  --t-base:    0.25s;
+  --t-slow:    0.4s;
+}
+
+/* ═══════════════════════════════════════════════════════
+   KEYFRAMES
+═══════════════════════════════════════════════════════ */
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0; }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+
+@keyframes slideInLeft {
+  from { opacity: 0; transform: translateX(-8px); }
+  to   { opacity: 1; transform: none; }
+}
+
+@keyframes shimmer {
+  0%   { background-position: -400px 0; }
+  100% { background-position:  400px 0; }
+}
+
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0  4px rgba(0, 255, 0, 0.08); }
+  50%       { box-shadow: 0 0 14px rgba(0, 255, 0, 0.28); }
+}
+
+@keyframes toast-slide {
+  from { transform: translateX(110%); opacity: 0; }
+  to   { transform: none;             opacity: 1; }
+}
+
+@keyframes dot-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.35; }
+}
+
+/* ═══════════════════════════════════════════════════════
+   RESET & BASE
+═══════════════════════════════════════════════════════ */
+*, *::before, *::after {
+  box-sizing: border-box;
+  border-radius: 0 !important;
+  margin: 0;
+  padding: 0;
+}
+
+html { overflow: hidden; }
+
+body {
+  background-color: var(--bg);
+  color: var(--text);
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: none;
+  -moz-osx-font-smoothing: unset;
+  overflow: hidden;
+}
+
+input, select, button, textarea {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 13px;
+  color: var(--text);
+}
+
+button { cursor: pointer; }
+
+a { text-decoration: none; }
+
+/* ═══════════════════════════════════════════════════════
+   SCROLLBAR
+═══════════════════════════════════════════════════════ */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb {
+  background: #252525;
+  transition: background var(--t-fast);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--accent);
+  box-shadow: var(--glow-xs);
+}
+
+/* ═══════════════════════════════════════════════════════
+   SELECTION
+═══════════════════════════════════════════════════════ */
+::selection {
+  background: rgba(0, 255, 0, 0.18);
+  color: var(--accent);
+}
+
+/* ═══════════════════════════════════════════════════════
+   FOCUS
+═══════════════════════════════════════════════════════ */
+*:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: var(--glow-xs);
+}
+
+/* ═══════════════════════════════════════════════════════
+   UTILITY CLASSES
+═══════════════════════════════════════════════════════ */
+.blink      { animation: blink 1s step-end infinite; }
+.fade-in    { animation: fadeIn 0.3s var(--ease) both; }
+.slide-left { animation: slideInLeft 0.25s var(--ease) both; }
+.dot-pulse  { animation: dot-pulse 2s ease-in-out infinite; }
+
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    #141414 25%,
+    #1e1e1e 50%,
+    #141414 75%
+  );
+  background-size: 400px 100%;
+  animation: shimmer 1.6s ease-in-out infinite;
+}
+
+.glow-border {
+  border-color: var(--accent-border) !important;
+  box-shadow: var(--glow-xs);
+}
+
+.panel {
+  background-color: var(--bg-card);
+  border: 1px solid var(--border);
+  padding: 12px;
+  transition: border-color var(--t-fast);
+}
+
+.panel:hover {
+  border-color: #2a2a2a;
+}
+
+/* ═══════════════════════════════════════════════════════
+   SCANLINES OVERLAY (CRT effect)
+═══════════════════════════════════════════════════════ */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent      0px,
+    transparent      3px,
+    rgba(0,0,0,0.03) 3px,
+    rgba(0,0,0,0.03) 4px
+  );
+  pointer-events: none;
+  z-index: 9999;
+}
