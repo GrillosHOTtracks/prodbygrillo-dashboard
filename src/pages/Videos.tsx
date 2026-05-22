@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import { VideoTable } from '../components/VideoTable'
 import { SkeletonTable, SkeletonCard } from '../components/ui/Skeleton'
 import { fmtNum } from '../utils/format'
@@ -33,6 +33,105 @@ const fieldStyle: React.CSSProperties = {
   outline: 'none',
   fontFamily: 'Courier New, monospace',
   transition: `border-color var(--t-fast), box-shadow var(--t-fast)`,
+}
+
+// ─── Empty state — vinyl + piano ASCII art ────────────────────────────────────
+function VideosEmptyState() {
+  const [frame, setFrame] = useState(0)
+  const raf = useRef<number | null>(null)
+  const lastRef = useRef(0)
+
+  useEffect(() => {
+    let f = 0
+    function tick(ts: number) {
+      if (ts - lastRef.current > 120) { f = (f + 1) % 8; setFrame(f); lastRef.current = ts }
+      raf.current = requestAnimationFrame(tick)
+    }
+    raf.current = requestAnimationFrame(tick)
+    return () => { if (raf.current) cancelAnimationFrame(raf.current) }
+  }, [])
+
+  const vinyl = [
+    '        .·:·:·:·:·:·:·:·.',
+    '     .·:·:·:·:·:·:·:·:·:·:·.',
+    '   .·:·:·:·:·:·:·:·:·:·:·:·:·.',
+    '  ·:·:·:·:·:·:·:·:·:·:·:·:·:·:·',
+    ' ·:·:·:·:·:· (( ● )) ·:·:·:·:·:·',
+    '  ·:·:·:·:·:·:·:·:·:·:·:·:·:·:·',
+    '   \'·:·:·:·:·:·:·:·:·:·:·:·:·\'',
+    '     \'·:·:·:·:·:·:·:·:·:·:\'',
+    '        \'·:·:·:·:·:·:·\'',
+  ]
+
+  const pianoKeys = '  |  | |  | |  | |  | |  | |  | |  |  '
+  const pianoBlack = [false,true,false,true,false,false,true,false,true,false,true,false]
+
+  // Spinning dots simulate vinyl rotation
+  const spinChars = ['◜','◝','◞','◟','◜','◝','◞','◟']
+  const spin = spinChars[frame]
+
+  return (
+    <div style={{
+      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+      minHeight: '60vh', fontFamily: 'Courier New, monospace',
+    }}>
+      {/* Vinyl */}
+      <div style={{ position: 'relative', marginBottom: '32px' }}>
+        <pre style={{
+          color: '#00ff00', fontSize: '13px', lineHeight: '1.55',
+          margin: 0, textShadow: '0 0 8px #00ff0055', letterSpacing: '0px',
+          userSelect: 'none',
+        }}>
+          {vinyl.map((line, i) => {
+            if (i === 4) {
+              return line.replace('●', spin) + '\n'
+            }
+            return line + '\n'
+          }).join('')}
+        </pre>
+        {/* Glow ring */}
+        <div style={{
+          position: 'absolute', inset: 0, pointerEvents: 'none',
+          background: 'radial-gradient(ellipse at center, #00ff0008 0%, transparent 70%)',
+        }} />
+      </div>
+
+      {/* Piano keys */}
+      <div style={{ marginBottom: '28px', userSelect: 'none' }}>
+        <div style={{ display: 'flex', gap: '2px' }}>
+          {pianoBlack.map((isBlack, i) => (
+            <div key={i} style={{
+              width: isBlack ? '14px' : '20px',
+              height: isBlack ? '40px' : '64px',
+              backgroundColor: isBlack ? '#111' : '#0a1a0a',
+              border: isBlack ? '1px solid #00ff0044' : '1px solid #00ff0077',
+              borderRadius: '0 0 3px 3px',
+              boxShadow: isBlack ? 'none' : '0 0 4px #00ff0022',
+              zIndex: isBlack ? 2 : 1,
+              position: 'relative',
+              alignSelf: 'flex-start',
+            }} />
+          ))}
+        </div>
+        <p style={{ color: '#00ff0033', fontSize: '9px', letterSpacing: '3px', textAlign: 'center', marginTop: '8px' }}>
+          {pianoKeys}
+        </p>
+      </div>
+
+      {/* Label */}
+      <p style={{
+        color: '#00ff00', fontSize: '11px', letterSpacing: '3px',
+        opacity: 0.6, margin: '0 0 6px', textShadow: '0 0 6px #00ff0044',
+      }}>
+        ┌─ NO VIDEOS LOADED ─────────────────┐
+      </p>
+      <p style={{
+        color: '#00ff0088', fontSize: '10px', letterSpacing: '2px', margin: 0,
+      }}>
+        connect · authenticate · stream
+      </p>
+    </div>
+  )
 }
 
 export function Videos({ realVideos, loading }: { realVideos?: ApiVideo[] | null; loading?: boolean }) {
@@ -74,17 +173,8 @@ export function Videos({ realVideos, loading }: { realVideos?: ApiVideo[] | null
     )
   }
 
-  if (!loading && !realVideos) {
-    return (
-      <div style={{ ...panel, padding: '48px 20px', textAlign: 'center' }}>
-        <p style={{ color: 'var(--text-faint)', fontSize: '12px', letterSpacing: '2px', marginBottom: '8px' }}>
-          *** YOUTUBE API QUOTA EXCEDIDA ***
-        </p>
-        <p style={{ color: 'var(--text-dim)', fontSize: '11px', letterSpacing: '1px' }}>
-          Reset automático às 08:00 UTC · 05:00 BRT
-        </p>
-      </div>
-    )
+  if (!loading && (!realVideos || realVideos.length === 0)) {
+    return <VideosEmptyState />
   }
 
   return (
