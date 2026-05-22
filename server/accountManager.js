@@ -134,7 +134,13 @@ class AccountManager {
         const cur = fs.existsSync(this.oauth.tokenPath)
           ? JSON.parse(fs.readFileSync(this.oauth.tokenPath))
           : {}
-        fs.writeFileSync(this.oauth.tokenPath, JSON.stringify({ ...cur, ...updated }, null, 2))
+        const merged = { ...cur, ...updated }
+        fs.writeFileSync(this.oauth.tokenPath, JSON.stringify(merged, null, 2))
+        // Remind to update Railway env var so restart doesn't lose auth
+        const b64 = Buffer.from(JSON.stringify(merged)).toString('base64')
+        console.log('[ACCOUNTS] Token refreshed — update GOOGLE_TOKEN in Railway:')
+        console.log('[ACCOUNTS] GET /api/auth/token-export for the base64 value')
+        console.log('[ACCOUNTS] base64 preview:', b64.slice(0, 40) + '...')
       })
     }
     return auth

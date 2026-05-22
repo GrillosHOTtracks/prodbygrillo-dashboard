@@ -227,6 +227,17 @@ router.post('/history/refresh', async (req, res) => {
   }
 })
 
+// ─── GET /api/upload/tmp/:filename ───────────────────────────────────────────
+// Serves temp video files via public URL so external APIs (Instagram, TikTok) can fetch them
+router.get('/tmp/:filename', (req, res) => {
+  const filename = path.basename(req.params.filename) // prevent path traversal
+  const filepath = path.join(TMP_DIR, filename)
+  if (!fs.existsSync(filepath)) return res.status(404).end()
+  res.setHeader('Content-Type',  'video/mp4')
+  res.setHeader('Cache-Control', 'no-store')
+  fs.createReadStream(filepath).pipe(res)
+})
+
 // ─── DELETE /api/upload/history/:id ─────────────────────────────────────────
 router.delete('/history/:id', (req, res) => {
   const history = readHistory().filter(e => e.id !== req.params.id)

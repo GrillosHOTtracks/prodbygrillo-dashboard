@@ -1,8 +1,62 @@
 require('dotenv').config()
 const express = require('express')
 const Groq = require('groq-sdk')
+const { GoogleGenerativeAI } = require('@google/generative-ai')
 
 const router = express.Router()
+
+// ─── Chat prompt builder ──────────────────────────────────────────────────────
+function buildChatPrompt(ctx, history, question) {
+  let prompt = `És um analista de YouTube especializado em beat producers, no nicho de RnB, PluggnB e Melodic Trap. Respondes sempre em português de Portugal. Usa os dados reais fornecidos para dar respostas concretas, directas e accionáveis. Evita linguagem genérica quando tens números reais disponíveis.`
+
+  if (ctx?.channel) {
+    const c = ctx.channel
+    prompt += `\n\n## Canal\nNome: ${c.name}\nInscritos: ${(c.subscribers || 0).toLocaleString('pt-PT')}\nViews totais: ${(c.totalViews || 0).toLocaleString('pt-PT')}\nVídeos publicados: ${c.totalVideos}`
+  }
+
+  if (ctx?.analytics) {
+    const a = ctx.analytics
+    const last7  = (a.daily || []).slice(-7)
+    const prev7  = (a.daily || []).slice(-14, -7)
+    const last7v = last7.reduce((s, d) => s + d.views, 0)
+    const prev7v = prev7.reduce((s, d) => s + d.views, 0)
+    const trend  = prev7v > 0 ? (((last7v - prev7v) / prev7v) * 100).toFixed(1) : null
+
+    prompt += `\n\n## Analytics (últimos ${a.days} dias)\nViews totais: ${(a.totalViews || 0).toLocaleString('pt-PT')}\nWatch time: ${Math.round(a.totalWatchTime || 0).toLocaleString('pt-PT')} minutos\nCTR médio: ${a.avgCtr}%\nInscritos ganhos: ${a.totalSubscribers}`
+    if (a.bestDay)  prompt += `\nMelhor dia: ${a.bestDay.date} — ${a.bestDay.views} views`
+    if (a.worstDay) prompt += `\nPior dia activo: ${a.worstDay.date} — ${a.worstDay.views} views`
+    if (trend !== null) prompt += `\nTendência (últimos 7d vs 7d anteriores): ${Number(trend) > 0 ? '+' : ''}${trend}%`
+
+    if (last7.length) {
+      prompt += '\n\nÚltimos 7 dias:'
+      last7.forEach(d => {
+        prompt += `\n- ${d.date}: ${d.views} views | ${Math.round(d.watchTime)} min | ${d.subscribers} subs`
+      })
+    }
+  }
+
+  if (ctx?.traffic?.length) {
+    prompt += '\n\n## Fontes de tráfego'
+    ctx.traffic.forEach(t => { prompt += `\n- ${t.name}: ${t.value}%` })
+  }
+
+  if (ctx?.videos?.length) {
+    prompt += `\n\n## Top ${ctx.videos.length} vídeos (por views)`
+    ctx.videos.forEach((v, i) => {
+      prompt += `\n${i + 1}. "${v.title}" — ${(v.views || 0).toLocaleString('pt-PT')} views | CTR: ${v.ctr}% | publicado: ${(v.publishedAt || '').slice(0, 10)}`
+    })
+  }
+
+  if (history?.length) {
+    prompt += '\n\n## Histórico da conversa'
+    history.forEach(m => { prompt += `\n${m.role === 'user' ? 'Utilizador' : 'AI'}: ${m.text}` })
+  }
+
+  prompt += `\n\nPergunta actual: ${question}`
+  prompt += '\n\nResponde de forma directa e prática com base nos dados acima. Se algum dado for insuficiente para responder, diz-o claramente.'
+
+  return prompt
+}
 
 // Replaces bare control chars inside JSON string values (LLaMA outputs literal \n in strings)
 function sanitizeJsonStrings(raw) {
@@ -140,6 +194,48 @@ router.post('/analyze-beat', async (req, res) => {
   } catch (err) {
     console.error('[AI] error:', err.message)
     res.write(`data: ${JSON.stringify({ error: err.message })}\n\n`)
+    res.end()
+  }
+})
+
+// POST /api/ai/chat — Gemini 2.0 Flash, SSE streaming
+router.post('/chat', async (req, res) => {
+  const { question, context, history } = req.body
+  if (!question || typeof question !== 'string' || !question.trim()) {
+    return res.status(400).json({ error: 'question is required' })
+  }
+
+  const apiKey = process.env.GEMINI_API_KEY
+  if (!apiKey) {
+    return res.status(503).json({ error: 'GEMINI_API_KEY não configurada no .env', code: 'NO_API_KEY' })
+  }
+
+  res.setHeader('Content-Type', 'text/event-stream')
+  res.setHeader('Cache-Control', 'no-cache')
+  res.setHeader('Connection', 'keep-alive')
+  res.setHeader('X-Accel-Buffering', 'no')
+  res.flushHeaders()
+
+  const send = (data) => { try { res.write(`data: ${JSON.stringify(data)}\n\n`) } catch {} }
+
+  try {
+    const genAI = new GoogleGenerativeAI(apiKey)
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' })
+
+    const prompt = buildChatPrompt(context, history, question.trim())
+    const result = await model.generateContentStream(prompt)
+
+    for await (const chunk of result.stream) {
+      const text = chunk.text()
+      if (text) send({ text })
+    }
+
+    res.write('data: [DONE]\n\n')
+    res.end()
+  } catch (err) {
+    console.error('[AI/chat] error:', err.message)
+    send({ error: err.message })
+    res.write('data: [DONE]\n\n')
     res.end()
   }
 })

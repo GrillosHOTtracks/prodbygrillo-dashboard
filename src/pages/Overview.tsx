@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import { AIChat } from '../components/AIChat'
 import { StatCard } from '../components/StatCard'
 import { IconEye, IconClock, IconUsers, IconDollar, IconPlay, IconCursor } from '../components/PixelIcons'
 import { ViewsChart } from '../components/charts/ViewsChart'
@@ -284,6 +285,17 @@ export function Overview({
             </p>
           )}
         </div>
+      </div>
+
+      {/* ── AI ANALYST ──────────────────────────────────────── */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+        <SectionLabel>AI ANALYST · CHAT COM OS DADOS ────────────────────────────</SectionLabel>
+        <AIChat
+          analytics={data.length ? data : null}
+          channelInfo={realChannel ?? null}
+          videos={videos ?? null}
+          traffic={trafficSources ?? null}
+        />
       </div>
 
     </div>

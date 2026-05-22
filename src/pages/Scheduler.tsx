@@ -50,6 +50,16 @@ interface UploadEntry {
 
 type Status      = 'idle' | 'loading' | 'done' | 'error'
 type UploadPhase = 'idle' | 'sending' | 'uploading' | 'processing' | 'done' | 'error'
+type IgPhase     = 'idle' | 'creating' | 'processing' | 'publishing' | 'done' | 'error'
+
+interface IgStatus {
+  authenticated: boolean
+  username?:  string
+  pageName?:  string
+  expiresAt?: number | null
+  daysLeft?:  number | null
+  warning?:   string | null
+}
 
 // ─── Shared styles ────────────────────────────────────────────────────────────
 const panel: React.CSSProperties = {
@@ -242,6 +252,96 @@ export function Scheduler() {
 
   // ── History refresh trigger
   const [histRefreshKey, setHistRefreshKey] = useState(0)
+
+  // ── Instagram state
+  const [igStatus, setIgStatus]       = useState<IgStatus | null>(null)
+  const [igCaption, setIgCaption]     = useState('')
+  const [igPhase, setIgPhase]         = useState<IgPhase>('idle')
+  const [igProgress, setIgProgress]   = useState(0)
+  const [igPermalink, setIgPermalink] = useState('')
+  const [igError, setIgError]         = useState('')
+
+  // ── Instagram auth + auto-populate
+  useEffect(() => {
+    fetch('/api/instagram/auth/status')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d) setIgStatus(d) })
+      .catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    if (!params.has('instagram_auth')) return
+    fetch('/api/instagram/auth/status')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d) setIgStatus(d) })
+      .catch(() => {})
+    window.history.replaceState({}, '', window.location.pathname)
+  }, [])
+
+  useEffect(() => {
+    if (!analysis) return
+    const firstLine = analysis.description.split('\n').find(l => l.trim()) || ''
+    setIgCaption(firstLine.trim())
+  }, [analysis])
+
+  const connectInstagram = useCallback(async () => {
+    try {
+      const origin = window.location.origin + window.location.pathname
+      const r = await fetch(`/api/instagram/auth/url?origin=${encodeURIComponent(origin)}`)
+      if (!r.ok) return
+      const { url } = await r.json()
+      window.location.href = url
+    } catch {}
+  }, [])
+
+  const handleIgUpload = useCallback(async () => {
+    if (!videoFile || igPhase !== 'idle') return
+    setIgPhase('creating')
+    setIgProgress(10)
+    setIgError('')
+    setIgPermalink('')
+
+    try {
+      const formData = new FormData()
+      formData.append('video', videoFile)
+      formData.append('meta', JSON.stringify({
+        caption:  igCaption,
+        hashtags: analysis?.hashtags ?? [],
+      }))
+
+      const res = await fetch('/api/instagram/upload', { method: 'POST', body: formData })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.error || `HTTP ${res.status}`)
+      }
+
+      const reader  = res.body!.getReader()
+      const decoder = new TextDecoder()
+      let rawBuf = ''
+
+      outer: while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        rawBuf += decoder.decode(value, { stream: true })
+        const lines = rawBuf.split('\n')
+        rawBuf = lines.pop() ?? ''
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue
+          const payload = line.slice(6).trim()
+          if (payload === '[DONE]') break outer
+          try {
+            const evt = JSON.parse(payload)
+            if (evt.status === 'CREATING_CONTAINER') { setIgPhase('creating');   setIgProgress(10) }
+            if (evt.status === 'PROCESSING')         { setIgPhase('processing'); setIgProgress(evt.progress ?? 40) }
+            if (evt.status === 'PUBLISHING')         { setIgPhase('publishing'); setIgProgress(90) }
+            if (evt.status === 'DONE')               { setIgPhase('done');       setIgProgress(100); setIgPermalink(evt.permalink || '') }
+            if (evt.status === 'ERROR')              throw new Error(evt.error || 'Erro no upload Instagram')
+          } catch (e) { if (!(e instanceof SyntaxError)) throw e }
+        }
+      }
+    } catch (err: any) { setIgError(err.message); setIgPhase('error') }
+  }, [videoFile, igCaption, igPhase, analysis])
 
   // ─ AI Analysis
   const analyze = useCallback(async () => {
@@ -736,10 +836,152 @@ export function Scheduler() {
             )}
           </div>
 
+          {/* ══ INSTAGRAM REELS ══ */}
+          <div style={panel}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+              <p style={{ color: '#e1306c', fontSize: '11px', letterSpacing: '1px', margin: 0 }}>
+                ┌─ PUBLICAR NO INSTAGRAM · REELS
+              </p>
+              {igStatus?.authenticated && (
+                <span style={{ color: '#555555', fontSize: '10px' }}>
+                  @{igStatus.username}
+                  {igStatus.daysLeft != null && (
+                    <span style={{ color: igStatus.daysLeft < 10 ? '#ff6600' : '#333333', marginLeft: '8px' }}>
+                      · token {igStatus.daysLeft}d
+                    </span>
+                  )}
+                </span>
+              )}
+            </div>
+
+            {/* Loading */}
+            {igStatus === null && (
+              <p style={{ color: '#333333', fontSize: '11px', letterSpacing: '2px' }}>VERIFICANDO<span className="blink">_</span></p>
+            )}
+
+            {/* Not connected */}
+            {igStatus && !igStatus.authenticated && (
+              <div style={{ textAlign: 'center', padding: '16px 0' }}>
+                <p style={{ color: '#555555', fontSize: '10px', margin: '0 0 12px', letterSpacing: '1px' }}>
+                  CONTA INSTAGRAM NÃO CONECTADA
+                </p>
+                <button
+                  onClick={connectInstagram}
+                  style={{ padding: '10px 24px', backgroundColor: '#e1306c', color: '#ffffff', border: 'none', cursor: 'pointer', fontFamily: 'Courier New, monospace', fontSize: '12px', fontWeight: 'bold', letterSpacing: '1px' }}
+                >[ CONECTAR INSTAGRAM ]</button>
+                <p style={{ color: '#333333', fontSize: '10px', margin: '10px 0 0' }}>
+                  Requer conta Instagram Business ligada a uma Facebook Page
+                </p>
+              </div>
+            )}
+
+            {/* Connected — idle or error */}
+            {igStatus?.authenticated && (igPhase === 'idle' || igPhase === 'error') && (
+              <>
+                {igStatus.warning && (
+                  <p style={{ color: '#ff6600', fontSize: '10px', margin: '0 0 10px' }}>⚠ {igStatus.warning}</p>
+                )}
+
+                {!videoFile && (
+                  <p style={{ color: '#444444', fontSize: '10px', margin: '0 0 12px', letterSpacing: '1px' }}>
+                    Seleciona o arquivo de vídeo na secção YouTube acima para publicar no Instagram.
+                  </p>
+                )}
+
+                <div style={{ marginBottom: '10px' }}>
+                  <p style={label10}>LEGENDA</p>
+                  <textarea
+                    value={igCaption}
+                    onChange={e => setIgCaption(e.target.value)}
+                    rows={3}
+                    placeholder="Legenda do Reel..."
+                    style={{ width: '100%', backgroundColor: '#111111', border: '1px solid #2a2a2a', color: '#c0c0c0', fontSize: '11px', padding: '8px', fontFamily: 'Courier New, monospace', outline: 'none', resize: 'vertical', boxSizing: 'border-box' }}
+                  />
+                </div>
+
+                {analysis.hashtags.length > 0 && (
+                  <div style={{ marginBottom: '14px' }}>
+                    <p style={label10}>HASHTAGS (adicionadas automaticamente)</p>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                      {analysis.hashtags.map((h, i) => <Chip key={i} text={h} accent />)}
+                    </div>
+                  </div>
+                )}
+
+                <p style={{ color: '#2a2a2a', fontSize: '10px', margin: '0 0 10px', lineHeight: '1.6' }}>
+                  ⚠ O servidor precisa estar acessível publicamente (Railway) para o Instagram processar o vídeo.
+                </p>
+
+                <button
+                  onClick={handleIgUpload}
+                  disabled={!videoFile}
+                  style={{
+                    width: '100%', padding: '12px',
+                    backgroundColor: videoFile ? '#e1306c' : '#1a1a1a',
+                    color: videoFile ? '#ffffff' : '#333333',
+                    border: videoFile ? 'none' : '1px solid #222222',
+                    cursor: videoFile ? 'pointer' : 'not-allowed',
+                    fontFamily: 'Courier New, monospace', fontSize: '13px',
+                    fontWeight: 'bold', letterSpacing: '2px',
+                  }}
+                >[ PUBLICAR REEL NO INSTAGRAM ]</button>
+
+                {igPhase === 'error' && (
+                  <p style={{ color: '#ff4400', fontSize: '10px', margin: '8px 0 0' }}>⚠ {igError}</p>
+                )}
+              </>
+            )}
+
+            {/* Progress */}
+            {igStatus?.authenticated && (igPhase === 'creating' || igPhase === 'processing' || igPhase === 'publishing') && (
+              <div style={{ padding: '8px 0' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+                  <span style={{ color: '#e1306c', fontSize: '11px', letterSpacing: '1px' }}>
+                    {igPhase === 'creating'   ? 'CRIANDO CONTAINER' :
+                     igPhase === 'processing' ? 'INSTAGRAM PROCESSANDO' :
+                     'PUBLICANDO REEL'}<span className="blink">_</span>
+                  </span>
+                  <span style={{ color: '#ffffff', fontSize: '13px', fontWeight: 'bold' }}>{igProgress}%</span>
+                </div>
+                <div style={{ backgroundColor: '#111111', height: '8px', border: '1px solid #1a1a1a' }}>
+                  <div style={{ width: `${igProgress}%`, height: '100%', backgroundColor: '#e1306c', transition: 'width 0.5s' }} />
+                </div>
+                {igPhase === 'processing' && (
+                  <p style={{ color: '#333333', fontSize: '10px', margin: '6px 0 0' }}>
+                    Instagram a processar o vídeo — pode demorar até 5 minutos...
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* Done */}
+            {igPhase === 'done' && (
+              <div style={{ textAlign: 'center', padding: '16px 0' }}>
+                <p style={{ color: '#e1306c', fontSize: '14px', fontWeight: 'bold', letterSpacing: '2px', margin: '0 0 10px' }}>
+                  ✓ REEL PUBLICADO COM SUCESSO
+                </p>
+                {igPermalink && (
+                  <a href={igPermalink} target="_blank" rel="noreferrer"
+                     style={{ color: '#707070', fontSize: '12px', letterSpacing: '1px' }}>
+                    ver no instagram ↗
+                  </a>
+                )}
+                <div style={{ marginTop: '12px' }}>
+                  <button
+                    onClick={() => { setIgPhase('idle'); setIgPermalink(''); setIgError('') }}
+                    style={retro}
+                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = '#c0c0c0' }}
+                    onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = '#707070' }}
+                  >[ PUBLICAR OUTRO ]</button>
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* ── RESET ── */}
           <div style={{ textAlign: 'center' }}>
             <button
-              onClick={() => { setStatus('idle'); setAnalysis(null); setStreamText(''); setBeatName(''); setThumbDataUrl(null); setUploadPhase('idle'); setVideoFile(null) }}
+              onClick={() => { setStatus('idle'); setAnalysis(null); setStreamText(''); setBeatName(''); setThumbDataUrl(null); setUploadPhase('idle'); setVideoFile(null); setIgPhase('idle'); setIgProgress(0); setIgPermalink(''); setIgError('') }}
               style={retro}
               onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = '#c0c0c0' }}
               onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = '#707070' }}

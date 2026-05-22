@@ -6,7 +6,8 @@ const fs      = require('fs')
 console.log('[SERVER] Node:', process.version, '| PORT env:', process.env.PORT)
 
 let authRoutes, accountsRoutes, channelRoutes, analyticsRoutes,
-    videosRoutes, audienceRoutes, trendingRoutes, aiRoutes, uploadRoutes, accountManager
+    videosRoutes, audienceRoutes, trendingRoutes, aiRoutes, uploadRoutes,
+    instagramRoutes, accountManager
 
 try {
   authRoutes      = require('./routes/auth')
@@ -18,6 +19,7 @@ try {
   trendingRoutes  = require('./routes/trending')
   aiRoutes        = require('./routes/ai')
   uploadRoutes    = require('./routes/upload')
+  instagramRoutes = require('./routes/instagram')
   accountManager  = require('./accountManager')
   console.log('[SERVER] All modules loaded OK')
 } catch (err) {
@@ -65,6 +67,7 @@ app.use('/api/audience',  requireAuth, audienceRoutes)
 app.use('/api/trending',  requireAuth, trendingRoutes)
 app.use('/api/ai',        requireAuth, aiRoutes)
 app.use('/api/upload',    requireAuth, uploadRoutes)
+app.use('/api/instagram', instagramRoutes)
 
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true, authenticated: accountManager.isAuthenticated(), ts: new Date().toISOString() })
