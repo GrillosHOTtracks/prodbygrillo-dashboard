@@ -129,64 +129,34 @@ router.post('/publish', upload.single('audio'), async (req, res) => {
 
     await dumpInputs('initial page')
 
-    // Fill email field
-    const emailFilled = await fillInput('email', email)
-    if (!emailFilled) {
-      // Last resort: type into first visible input
-      await page.evaluate((v) => {
-        const el = document.querySelector('input')
-        if (el) { el.focus(); el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })) }
-      }, email)
-    }
-    await new Promise(r => setTimeout(r, 400))
+    // BeatStars uses AngularJS — must use real keystrokes (keyboard.type) so
+    // Angular's $watch picks up the value. Selectors confirmed from live logs:
+    //   email:    #oath-email
+    //   password: #userPassword
 
-    // Click the submit / Continue button to advance to password step
-    const clicked = await page.evaluate(() => {
-      const btn = document.querySelector('button[type="submit"]') ||
-                  Array.from(document.querySelectorAll('button')).find(b =>
-                    /continue|next|login|sign\s*in|entrar/i.test(b.textContent || '')
-                  )
-      if (btn) { btn.click(); return true }
-      return false
-    })
-    if (!clicked) await page.keyboard.press('Enter')
+    // Fill email
+    await page.waitForSelector('#oath-email', { timeout: 10000 })
+    await page.click('#oath-email', { clickCount: 3 })
+    await page.keyboard.type(email, { delay: 40 })
+    await new Promise(r => setTimeout(r, 500))
 
-    // Wait for password field to appear — poll the DOM directly
-    await page.waitForFunction(() => {
-      const inputs = Array.from(document.querySelectorAll('input'))
-      return inputs.some(i =>
-        i.type === 'password' ||
-        (i.name || '').toLowerCase().includes('password') ||
-        (i.placeholder || '').toLowerCase().includes('password') ||
-        (i.autocomplete || '').toLowerCase().includes('password') ||
-        (i.getAttribute('aria-label') || '').toLowerCase().includes('password') ||
-        (i.id || '').toLowerCase().includes('password')
-      )
-    }, { timeout: 12000 }).catch(async () => {
-      // Log what we actually see before throwing
-      await dumpInputs('after email submit — password NOT found')
-    })
+    // Submit email step
+    await page.keyboard.press('Enter')
 
+    // Wait for password field
+    await page.waitForSelector('#userPassword', { timeout: 15000 })
     await dumpInputs('after email submit')
-    await new Promise(r => setTimeout(r, 400))
+    await new Promise(r => setTimeout(r, 500))
 
-    // Fill password
-    const pwFilled = await fillInput('password', password)
-    if (!pwFilled) throw new Error('Campo de password não encontrado na página do BeatStars — ver logs do Railway')
-
+    // Fill password with real keystrokes
+    await page.click('#userPassword', { clickCount: 3 })
+    await page.keyboard.type(password, { delay: 40 })
     await new Promise(r => setTimeout(r, 300))
 
-    // Submit
+    // Submit password step
     await Promise.all([
       page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {}),
-      page.evaluate(() => {
-        const btn = document.querySelector('button[type="submit"]') ||
-                    Array.from(document.querySelectorAll('button')).find(b =>
-                      /login|sign\s*in|entrar|continue/i.test(b.textContent || '')
-                    )
-        if (btn) btn.click()
-        else document.querySelector('input[type="password"]')?.form?.submit()
-      }),
+      page.keyboard.press('Enter'),
     ])
 
     await new Promise(r => setTimeout(r, 2500))
