@@ -65,7 +65,7 @@ if (fs.existsSync(distPath)) {
   app.get('*', (req, res) => res.sendFile(path.join(distPath, 'index.html')))
 }
 
-const server = app.listen(PORT, () => {
+const server = app.listen(PORT, '0.0.0.0', () => {
   const { oauth, keys } = accountManager.getStatus()
   console.log(`\n  [SERVER] http://localhost:${PORT}`)
   if (!oauth.hasCredFile) {
@@ -94,5 +94,4 @@ process.on('uncaughtException', (err) => {
 
 process.on('unhandledRejection', (reason) => {
   console.error('[UNHANDLED REJECTION]', reason)
-  process.exit(1)
 })
