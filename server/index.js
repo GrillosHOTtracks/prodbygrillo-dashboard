@@ -3,16 +3,28 @@ const cors    = require('cors')
 const path    = require('path')
 const fs      = require('fs')
 
-const authRoutes      = require('./routes/auth')
-const accountsRoutes  = require('./routes/accounts')
-const channelRoutes   = require('./routes/channel')
-const analyticsRoutes = require('./routes/analytics')
-const videosRoutes    = require('./routes/videos')
-const audienceRoutes  = require('./routes/audience')
-const trendingRoutes  = require('./routes/trending')
-const aiRoutes        = require('./routes/ai')
-const uploadRoutes    = require('./routes/upload')
-const accountManager  = require('./accountManager')
+console.log('[SERVER] Node:', process.version, '| PORT env:', process.env.PORT)
+
+let authRoutes, accountsRoutes, channelRoutes, analyticsRoutes,
+    videosRoutes, audienceRoutes, trendingRoutes, aiRoutes, uploadRoutes, accountManager
+
+try {
+  authRoutes      = require('./routes/auth')
+  accountsRoutes  = require('./routes/accounts')
+  channelRoutes   = require('./routes/channel')
+  analyticsRoutes = require('./routes/analytics')
+  videosRoutes    = require('./routes/videos')
+  audienceRoutes  = require('./routes/audience')
+  trendingRoutes  = require('./routes/trending')
+  aiRoutes        = require('./routes/ai')
+  uploadRoutes    = require('./routes/upload')
+  accountManager  = require('./accountManager')
+  console.log('[SERVER] All modules loaded OK')
+} catch (err) {
+  console.error('[SERVER] Module load error:', err.message)
+  console.error(err.stack)
+  process.exit(1)
+}
 
 const app  = express()
 const PORT = process.env.PORT || 3010
@@ -45,7 +57,7 @@ function requireAuth(req, res, next) {
 }
 
 app.use('/api/auth',      authRoutes)
-app.use('/api/accounts',  accountsRoutes)           // no requireAuth — needed before login
+app.use('/api/accounts',  accountsRoutes)
 app.use('/api/channel',   requireAuth, channelRoutes)
 app.use('/api/analytics', requireAuth, analyticsRoutes)
 app.use('/api/videos',    requireAuth, videosRoutes)
@@ -54,32 +66,29 @@ app.use('/api/trending',  requireAuth, trendingRoutes)
 app.use('/api/ai',        requireAuth, aiRoutes)
 app.use('/api/upload',    requireAuth, uploadRoutes)
 
-app.get('/api/health', (req, res) => {
+app.get('/api/health', (_req, res) => {
   res.json({ ok: true, authenticated: accountManager.isAuthenticated(), ts: new Date().toISOString() })
 })
 
 // Serve built frontend in production
 const distPath = path.join(__dirname, '..', 'dist')
 if (fs.existsSync(distPath)) {
+  console.log('[SERVER] Serving static frontend from', distPath)
   app.use(express.static(distPath))
-  app.get('*', (req, res) => res.sendFile(path.join(distPath, 'index.html')))
+  app.get('*path', (_req, res) => res.sendFile(path.join(distPath, 'index.html')))
+} else {
+  console.log('[SERVER] No dist/ folder found — API-only mode')
 }
 
 const server = app.listen(PORT, '0.0.0.0', () => {
-  const { oauth, keys } = accountManager.getStatus()
-  console.log(`\n  [SERVER] http://localhost:${PORT}`)
-  if (!oauth.hasCredFile) {
-    console.log(`  [AUTH  ] ✗ client_secret_1.json não encontrado`)
-  } else {
-    const oaFlag = oauth.authenticated ? (oauth.quotaExceeded ? '⚠ quota' : '✓') : '✗ not connected'
-    console.log(`  [OAUTH ] ${oaFlag}`)
-    for (const k of keys) {
-      const kFlag = k.quotaExceeded ? '⚠ quota' : k.active ? '✓ active' : '✓'
-      console.log(`  [KEY ${k.n} ] ${kFlag}`)
-    }
-    if (keys.length === 0) console.log(`  [KEYS  ] none — add YT_API_KEY_2=... to .env`)
+  console.log(`[SERVER] Listening on 0.0.0.0:${PORT}`)
+  try {
+    const { oauth, keys } = accountManager.getStatus()
+    const oaFlag = !oauth.hasCredFile ? '✗ no creds' : oauth.authenticated ? '✓' : '✗ not connected'
+    console.log(`[SERVER] OAuth: ${oaFlag} | API keys: ${keys.length}`)
+  } catch (e) {
+    console.warn('[SERVER] getStatus error:', e.message)
   }
-  console.log()
 })
 
 server.on('error', (err) => {
@@ -88,7 +97,7 @@ server.on('error', (err) => {
 })
 
 process.on('uncaughtException', (err) => {
-  console.error('[UNCAUGHT]', err.message)
+  console.error('[UNCAUGHT EXCEPTION]', err.stack)
   process.exit(1)
 })
 
