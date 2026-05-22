@@ -234,7 +234,12 @@ router.post('/chat', async (req, res) => {
     res.end()
   } catch (err) {
     console.error('[AI/chat] error:', err.message)
-    send({ error: err.message })
+    const isQuota = /429|quota|Too Many Requests/i.test(err.message)
+    send({
+      error: isQuota
+        ? 'Quota Gemini excedida. Obtém uma key nova em aistudio.google.com/apikey e actualiza GEMINI_API_KEY no Railway.'
+        : err.message,
+    })
     res.write('data: [DONE]\n\n')
     res.end()
   }
