@@ -277,19 +277,33 @@ router.post('/analyze-beat', async (req, res) => {
 
   try {
     const client = new Groq({ apiKey })
+    const MODELS = ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant']
 
-    // Buffer full response to sanitize JSON before streaming back
+    // Buffer full response to sanitize JSON before streaming back.
+    // Cascade through models on 429 (daily token limit).
     let fullText = ''
-    const stream = await client.chat.completions.create({
-      model: 'llama-3.3-70b-versatile',
-      max_tokens: 3500,
-      stream: true,
-      messages: [{ role: 'user', content: buildPrompt(beatName.trim(), detectedBpm, detectedKey) }],
-    })
-
-    for await (const chunk of stream) {
-      const text = chunk.choices[0]?.delta?.content || ''
-      if (text) fullText += text
+    for (let mi = 0; mi < MODELS.length; mi++) {
+      fullText = ''
+      try {
+        const stream = await client.chat.completions.create({
+          model: MODELS[mi],
+          max_tokens: 3500,
+          stream: true,
+          messages: [{ role: 'user', content: buildPrompt(beatName.trim(), detectedBpm, detectedKey) }],
+        })
+        for await (const chunk of stream) {
+          const text = chunk.choices[0]?.delta?.content || ''
+          if (text) fullText += text
+        }
+        break // success — stop trying models
+      } catch (modelErr) {
+        const is429 = modelErr?.status === 429 || /rate_limit_exceeded/i.test(modelErr?.message || '')
+        if (is429 && mi < MODELS.length - 1) {
+          console.warn(`[AI] ${MODELS[mi]} rate-limited — retrying with ${MODELS[mi + 1]}`)
+          continue
+        }
+        throw modelErr
+      }
     }
 
     // Strip markdown fences if model wrapped in ```json ... ```
@@ -342,21 +356,33 @@ router.post('/chat', async (req, res) => {
   try {
     const client = new Groq({ apiKey })
     const prompt = buildChatPrompt(context, history, question.trim())
+    const MODELS = ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant']
 
-    const stream = await client.chat.completions.create({
-      model:      'llama-3.3-70b-versatile',
-      max_tokens: 1024,
-      stream:     true,
-      messages:   [{ role: 'user', content: prompt }],
-    })
-
-    for await (const chunk of stream) {
-      const text = chunk.choices[0]?.delta?.content || ''
-      if (text) send({ text })
+    let streamed = false
+    for (let mi = 0; mi < MODELS.length; mi++) {
+      try {
+        const stream = await client.chat.completions.create({
+          model:      MODELS[mi],
+          max_tokens: 1024,
+          stream:     true,
+          messages:   [{ role: 'user', content: prompt }],
+        })
+        for await (const chunk of stream) {
+          const text = chunk.choices[0]?.delta?.content || ''
+          if (text) send({ text })
+        }
+        streamed = true
+        break
+      } catch (modelErr) {
+        const is429 = modelErr?.status === 429 || /rate_limit_exceeded/i.test(modelErr?.message || '')
+        if (is429 && mi < MODELS.length - 1) {
+          console.warn(`[AI/chat] ${MODELS[mi]} rate-limited — retrying with ${MODELS[mi + 1]}`)
+          continue
+        }
+        throw modelErr
+      }
     }
-
-    res.write('data: [DONE]\n\n')
-    res.end()
+    if (streamed) { res.write('data: [DONE]\n\n'); res.end() }
   } catch (err) {
     console.error('[AI/chat] error:', err.message)
     send({ error: err.message })
