@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { Sidebar } from './components/Sidebar'
 import { Header } from './components/Header'
 import { Overview } from './pages/Overview'
@@ -116,6 +116,7 @@ export default function App() {
   const [authChecked, setAuthChecked]           = useState(false)
   const [authenticated, setAuthenticated]       = useState(false)
   const [serverDown, setServerDown]             = useState(false)
+  const prevAuthenticated                       = useRef(false)
 
   // Data
   const [channelInfo, setChannelInfo]           = useState<ChannelInfo | null>(null)
@@ -166,7 +167,9 @@ export default function App() {
   // Fetch channel info once authenticated
   useEffect(() => {
     if (!authenticated) return
-    api.channel().then(setChannelInfo).catch(err => {
+    const justConnected = !prevAuthenticated.current
+    prevAuthenticated.current = true
+    api.channel(justConnected).then(setChannelInfo).catch(err => {
       console.warn('[channel]', err?.message || err)
     })
     setVideosLoading(true)

@@ -79,7 +79,7 @@ export const api = {
     connect:    ()  => get<{ url: string }>(`/auth/url?origin=${encodeURIComponent(window.location.origin)}`),
     disconnect: async () => { await fetch(`${BASE}/auth/logout`, { method: 'POST' }) },
   },
-  channel:        ()             => get<ChannelInfo>('/channel'),
+  channel:        (bust = false) => get<ChannelInfo>(`/channel${bust ? '?bust=1' : ''}`),
   analytics:      (range: string) => get<AnalyticsResponse>(`/analytics?range=${range}`),
   traffic:        (range: string) => get<TrafficResponse>(`/analytics/traffic?range=${range}`),
   revenueMonthly: ()             => get<RevenueResponse>('/analytics/revenue-monthly'),

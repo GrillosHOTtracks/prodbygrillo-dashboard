@@ -64,18 +64,52 @@ router.get('/', async (req, res) => {
     const cached = _mem?.data || loadDisk()
 
     if (isQuotaError(err) || err?.code === 'UNAUTHENTICATED') {
-      // Try Innertube for public data — use cached id or env var as ultimate fallback
       const channelId = cached?.id || process.env.CHANNEL_ID
+
       if (channelId) {
+        // Step 1: API key fallback — channels.list?id= costs only 1 unit
         try {
-          const pub = await innertube.channelInfo(channelId)
-          if (pub?.name) {
+          const pub = await accountManager.withPublicYouTube(async (auth) => {
+            const youtube = google.youtube({ version: 'v3', auth })
+            const { data } = await youtube.channels.list({
+              part: ['snippet', 'statistics', 'contentDetails'],
+              id: [channelId],
+            })
+            const ch = data.items?.[0]
+            if (!ch) return null
+            return {
+              id:              ch.id,
+              name:            ch.snippet.title,
+              handle:          ch.snippet.customUrl || `@${ch.snippet.title}`,
+              description:     ch.snippet.description,
+              thumbnail:       ch.snippet.thumbnails?.default?.url,
+              country:         ch.snippet.country || 'BR',
+              publishedAt:     ch.snippet.publishedAt,
+              subscribers:     parseInt(ch.statistics.subscriberCount || '0'),
+              totalViews:      parseInt(ch.statistics.viewCount || '0'),
+              totalVideos:     parseInt(ch.statistics.videoCount || '0'),
+              uploadsPlaylist: ch.contentDetails?.relatedPlaylists?.uploads || null,
+            }
+          })
+          if (pub) {
+            _mem = { data: pub, _ts: Date.now() }
+            saveDisk(pub)
+            return res.json(pub)
+          }
+        } catch (pubErr) {
+          console.warn('[channel] public API fallback failed:', pubErr.message)
+        }
+
+        // Step 2: Innertube (zero quota, zero API key)
+        try {
+          const it = await innertube.channelInfo(channelId)
+          if (it?.name) {
             const merged = {
               ...(cached || {}),
-              name:        pub.name,
-              handle:      pub.handle || cached?.handle || '',
-              subscribers: pub.subscribers || cached?.subscribers || 0,
-              thumbnail:   pub.thumbnail  || cached?.thumbnail  || '',
+              name:        it.name,
+              handle:      it.handle || cached?.handle || '',
+              subscribers: it.subscribers || cached?.subscribers || 0,
+              thumbnail:   it.thumbnail  || cached?.thumbnail  || '',
               _innertube:  true,
             }
             _mem = { data: merged, _ts: Date.now() }
@@ -86,6 +120,7 @@ router.get('/', async (req, res) => {
           console.warn('[channel] Innertube fallback failed:', itErr.message)
         }
       }
+
       if (cached) return res.json({ ...cached, _cached: true })
 
       // Last resort: seed from env vars so Overview never shows empty
