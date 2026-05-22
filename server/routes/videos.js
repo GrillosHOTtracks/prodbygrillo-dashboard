@@ -49,7 +49,9 @@ router.get('/', async (req, res) => {
   }
 
   // Declared outside try so catch block can access for RSS fallback
-  let channelId, uploadsPlaylist
+  // Initialize from env so RSS fallback works even when channel cache is cold
+  let channelId = process.env.CHANNEL_ID || null
+  let uploadsPlaylist = null
 
   try {
     const maxResults = Math.min(parseInt(req.query.maxResults || '25'), 50)
