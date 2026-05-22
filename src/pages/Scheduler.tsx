@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { ThumbnailBuilder } from '../components/scheduler/ThumbnailBuilder'
+import { analyzeAudio } from '../lib/audioAnalysis'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface BeatAnalysis {
@@ -233,6 +234,11 @@ export function Scheduler() {
   const [igPermalink, setIgPermalink] = useState('')
   const [igError, setIgError]         = useState('')
 
+  // ── Audio detection
+  const [audioStatus, setAudioStatus]   = useState<'idle' | 'detecting' | 'done' | 'error'>('idle')
+  const [detectedBpm, setDetectedBpm]   = useState<number | null>(null)
+  const [detectedKey, setDetectedKey]   = useState<string | null>(null)
+
   // ── History
   const [histRefreshKey, setHistRefreshKey] = useState(0)
 
@@ -257,22 +263,34 @@ export function Scheduler() {
     setIgCaption(firstLine.trim())
   }, [analysis])
 
-  // Handle video selection — extract beat name + auto-trigger analysis
-  function onVideoSelect(file: File) {
+  // Handle video selection — extract beat name + start audio detection
+  async function onVideoSelect(file: File) {
     setVideoFile(file)
     const name = file.name
       .replace(/\.[^.]+$/, '')        // remove extension
       .replace(/[-_]/g, ' ')          // underscores/dashes → spaces
       .replace(/\s+/g, ' ').trim()
     setBeatName(name)
+
+    setAudioStatus('detecting')
+    setDetectedBpm(null)
+    setDetectedKey(null)
+    try {
+      const result = await analyzeAudio(file)
+      setDetectedBpm(result.bpm)
+      setDetectedKey(result.key)
+      setAudioStatus('done')
+    } catch {
+      setAudioStatus('error')
+    }
   }
 
-  // Auto-trigger analysis when video + beat name ready
+  // Auto-trigger AI analysis once audio detection finishes
   useEffect(() => {
-    if (videoFile && beatName.trim() && aiStatus === 'idle') {
-      analyze(beatName.trim())
+    if ((audioStatus === 'done' || audioStatus === 'error') && beatName.trim() && aiStatus === 'idle') {
+      analyze(beatName.trim(), detectedBpm, detectedKey)
     }
-  }, [videoFile]) // eslint-disable-line
+  }, [audioStatus]) // eslint-disable-line
 
   // Handle thumbnail selection
   function onThumbSelect(file: File) {
@@ -287,7 +305,7 @@ export function Scheduler() {
   }
 
   // ── AI Analysis
-  const analyze = useCallback(async (name: string) => {
+  const analyze = useCallback(async (name: string, bpm: number | null = null, key: string | null = null) => {
     if (!name.trim() || aiStatus === 'loading') return
     setAiStatus('loading')
     setStreamText('')
@@ -300,7 +318,7 @@ export function Scheduler() {
       const res = await fetch('/api/ai/analyze-beat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ beatName: name }),
+        body: JSON.stringify({ beatName: name, bpm, key }),
       })
       if (!res.ok) {
         const body = await res.json().catch(() => ({}))
@@ -469,6 +487,7 @@ export function Scheduler() {
   function reset() {
     setStep(1); setVideoFile(null); setThumbFile(null); setThumbPreview(null); setBeatName('')
     setAiStatus('idle'); setStreamText(''); setAnalysis(null); setAiError('')
+    setAudioStatus('idle'); setDetectedBpm(null); setDetectedKey(null)
     setEditTitle(''); setEditDesc(''); setEditTags(''); setEditHashtags(''); setScheduledAt('')
     setThumbDataUrl(null); setUploadPhase('idle'); setUploadVideoId(null); setUploadError('')
     setIgPhase('idle'); setIgProgress(0); setIgPermalink(''); setIgError('')
@@ -538,9 +557,28 @@ export function Scheduler() {
                     style={{ ...fieldStyle, borderBottom: '2px solid #00ff00' }}
                   />
                   {aiStatus === 'idle' && beatName.trim() && (
-                    <button onClick={() => analyze(beatName.trim())} style={{ ...retro, color: '#00ff00', border: '1px solid #00ff00', flexShrink: 0, padding: '6px 12px' }}>[ RE-ANALISAR ]</button>
+                    <button onClick={() => analyze(beatName.trim(), detectedBpm, detectedKey)} style={{ ...retro, color: '#00ff00', border: '1px solid #00ff00', flexShrink: 0, padding: '6px 12px' }}>[ RE-ANALISAR ]</button>
                   )}
                 </div>
+                {/* Audio detection indicator */}
+                {audioStatus === 'detecting' && (
+                  <p style={{ color: '#ffaa00', fontSize: '10px', margin: '6px 0 0', letterSpacing: '1px' }}>
+                    ● DETECTANDO BPM/KEY<span className="blink">_</span>
+                  </p>
+                )}
+                {audioStatus === 'done' && (
+                  <div style={{ display: 'flex', gap: '6px', alignItems: 'center', marginTop: '6px' }}>
+                    <span style={{ color: '#00ff00', fontSize: '10px', letterSpacing: '1px' }}>● ÁUDIO</span>
+                    {detectedBpm && <span style={{ color: '#00ff00', fontSize: '10px', border: '1px solid #1a3a1a', padding: '1px 6px' }}>{detectedBpm} BPM</span>}
+                    {detectedKey && <span style={{ color: '#00ff00', fontSize: '10px', border: '1px solid #1a3a1a', padding: '1px 6px' }}>{detectedKey}</span>}
+                    {!detectedBpm && !detectedKey && <span style={{ color: '#555555', fontSize: '10px' }}>sem resultado</span>}
+                  </div>
+                )}
+                {audioStatus === 'error' && (
+                  <p style={{ color: '#444444', fontSize: '10px', margin: '6px 0 0', letterSpacing: '1px' }}>
+                    ● BPM/KEY não detectado — continua sem dados
+                  </p>
+                )}
               </div>
             )}
           </div>
@@ -619,7 +657,7 @@ export function Scheduler() {
           {aiStatus === 'error' && (
             <div>
               <p style={{ color: '#ff4400', fontSize: '11px', margin: '0 0 8px' }}>⚠ {aiError}</p>
-              <button onClick={() => analyze(beatName.trim())} style={{ ...retro, color: '#ff6600', border: '1px solid #333333' }}
+              <button onClick={() => analyze(beatName.trim(), detectedBpm, detectedKey)} style={{ ...retro, color: '#ff6600', border: '1px solid #333333' }}
                 onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = '#c0c0c0' }}
                 onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = '#ff6600' }}>
                 [ TENTAR NOVAMENTE ]
@@ -750,7 +788,7 @@ export function Scheduler() {
               {/* Re-analyze button */}
               <div style={{ textAlign: 'center' }}>
                 <button
-                  onClick={() => analyze(beatName.trim())}
+                  onClick={() => analyze(beatName.trim(), detectedBpm, detectedKey)}
                   style={{ ...retro, color: '#00aa00', border: '1px solid #1a3a1a', padding: '8px 20px', fontSize: '11px' }}
                   onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = '#00ff00'; (e.currentTarget as HTMLElement).style.borderColor = '#00aa00' }}
                   onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = '#00aa00'; (e.currentTarget as HTMLElement).style.borderColor = '#1a3a1a' }}

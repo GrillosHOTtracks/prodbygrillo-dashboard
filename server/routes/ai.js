@@ -132,7 +132,7 @@ function sanitizeJsonStrings(raw) {
   return result
 }
 
-function buildPrompt(beatName) {
+function buildPrompt(beatName, detectedBpm, detectedKey) {
   const now    = new Date()
   const month  = now.toLocaleString('en-US', { month: 'long' })
   const year   = now.getFullYear()
@@ -149,6 +149,12 @@ function buildPrompt(beatName) {
   ]
   const angle = angles[Math.floor(Math.random() * angles.length)]
 
+  const audioNote = (detectedBpm !== null || detectedKey !== null)
+    ? `\n\nAUDIO ANALYSIS (detected from the audio file — use these EXACT values, do NOT override):\n` +
+      (detectedBpm !== null ? `- BPM: ${detectedBpm}\n` : '') +
+      (detectedKey !== null ? `- Key: ${detectedKey}\n` : '')
+    : ''
+
   return `You are an expert in YouTube SEO and digital marketing for beat producers, with encyclopedic knowledge of RnB, PluggnB, Melodic Trap, Drill, Afrobeats, and all instrumental/type-beat subgenres.
 
 VARIATION SEED: ${seed}
@@ -157,7 +163,7 @@ CREATIVE ANGLE FOR THIS ANALYSIS: ${angle}
 You MUST produce a completely unique analysis every time. Never reuse titles, tags, or suggestions from previous analyses. The seed and angle above must influence your output in a measurable way.
 
 Analyze the following beat name for a YouTube upload:
-"${beatName}"
+"${beatName}"${audioNote}
 
 Context: it is ${month} ${year}. You have deep knowledge of:
 - Current trending artists across all subgenres of trap, RnB, PluggnB, melodic rap
@@ -174,7 +180,7 @@ CRITICAL — The "description" field MUST use EXACTLY this template. Fill in onl
 
 💰 BUY (Untagged): https://www.beatstars.com/prodbygrillo
 
-🎵 [INFERRED_BPM] BPM | [INFERRED_KEY]
+🎵 ${detectedBpm !== null ? detectedBpm : '[INFERRED_BPM]'} BPM | ${detectedKey !== null ? detectedKey : '[INFERRED_KEY]'}
 
 📋 LEASING:
 * MP3 Lease - $24.99
@@ -206,8 +212,8 @@ Return ONLY valid JSON, no markdown, no extra text. Use this exact structure:
 
 {
   "seoScore": <integer 0-100>,
-  "bpm": <exact BPM as integer ONLY if explicitly stated in the beat name (e.g. "Hard 140bpm Beat" → 140) — otherwise return null>,
-  "key": "<exact musical key ONLY if explicitly stated in the beat name (e.g. "Am Beat", "G Minor Drill") — otherwise return null>",
+  "bpm": ${detectedBpm !== null ? detectedBpm : '<exact BPM as integer ONLY if explicitly stated in the beat name — otherwise return null>'},
+  "key": ${detectedKey !== null ? `"${detectedKey}"` : '"<exact musical key ONLY if explicitly stated in the beat name — otherwise return null>"'},
   "titleAnalysis": {
     "score": <integer 0-100>,
     "charCount": <character count of the original beat name>,
@@ -248,10 +254,12 @@ Return ONLY valid JSON, no markdown, no extra text. Use this exact structure:
 
 // POST /api/ai/analyze-beat  — streams SSE
 router.post('/analyze-beat', async (req, res) => {
-  const { beatName } = req.body
+  const { beatName, bpm, key } = req.body
   if (!beatName || typeof beatName !== 'string' || !beatName.trim()) {
     return res.status(400).json({ error: 'beatName is required' })
   }
+  const detectedBpm = typeof bpm === 'number' && Number.isFinite(bpm) ? Math.round(bpm) : null
+  const detectedKey = typeof key === 'string' && key.trim() ? key.trim() : null
 
   const apiKey = process.env.GROQ_API_KEY
   if (!apiKey) {
@@ -276,7 +284,7 @@ router.post('/analyze-beat', async (req, res) => {
       model: 'llama-3.3-70b-versatile',
       max_tokens: 3500,
       stream: true,
-      messages: [{ role: 'user', content: buildPrompt(beatName.trim()) }],
+      messages: [{ role: 'user', content: buildPrompt(beatName.trim(), detectedBpm, detectedKey) }],
     })
 
     for await (const chunk of stream) {
