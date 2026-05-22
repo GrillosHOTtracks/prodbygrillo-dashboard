@@ -54,12 +54,26 @@ router.get('/', async (req, res) => {
       })
 
       // Countries
+      const COUNTRY_NAMES = {
+        BR:'Brasil',US:'Estados Unidos',GB:'Reino Unido',MX:'México',AR:'Argentina',
+        CO:'Colômbia',PT:'Portugal',ES:'Espanha',CA:'Canadá',AU:'Austrália',
+        DE:'Alemanha',FR:'França',IT:'Itália',JP:'Japão',NG:'Nigéria',GH:'Gana',
+        ZA:'África do Sul',IN:'Índia',TR:'Turquia',RU:'Rússia',PL:'Polônia',
+        NL:'Holanda',SE:'Suécia',NO:'Noruega',DK:'Dinamarca',CL:'Chile',
+        PE:'Peru',VE:'Venezuela',BO:'Bolívia',UY:'Uruguai',PY:'Paraguai',
+        EC:'Equador',DO:'Rep. Dominicana',PR:'Porto Rico',CR:'Costa Rica',
+        SV:'El Salvador',GT:'Guatemala',HN:'Honduras',NI:'Nicarágua',PA:'Panamá',
+        CU:'Cuba',JM:'Jamaica',TT:'Trinidad e Tobago',HT:'Haiti',
+        AO:'Angola',MZ:'Moçambique',CV:'Cabo Verde',ST:'São Tomé e Príncipe',
+        KE:'Quênia',TZ:'Tanzânia',ET:'Etiópia',EG:'Egito',MA:'Marrocos',
+        SN:'Senegal',CI:'Costa do Marfim',CM:'Camarões',
+      }
       const countries = []
       if (countryRes.status === 'fulfilled') {
         const rows       = countryRes.value.data.rows || []
         const totalViews = rows.reduce((s, r) => s + r[1], 0)
         for (const row of rows) {
-          countries.push({ code: row[0], name: row[0], views: row[1], percentage: parseFloat(((row[1] / totalViews) * 100).toFixed(1)) })
+          countries.push({ code: row[0], name: COUNTRY_NAMES[row[0]] || row[0], views: row[1], percentage: parseFloat(((row[1] / totalViews) * 100).toFixed(1)) })
         }
       }
 

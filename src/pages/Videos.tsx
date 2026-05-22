@@ -69,9 +69,20 @@ export function Videos({ realVideos, loading }: { realVideos?: ApiVideo[] | null
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '8px' }}>
           {Array.from({ length: 4 }).map((_, i) => <SkeletonCard key={i} height="28px" />)}
         </div>
-        <div style={panel}>
-          <SkeletonTable rows={8} />
-        </div>
+        <div style={panel}><SkeletonTable rows={8} /></div>
+      </div>
+    )
+  }
+
+  if (!loading && !realVideos) {
+    return (
+      <div style={{ ...panel, padding: '48px 20px', textAlign: 'center' }}>
+        <p style={{ color: 'var(--text-faint)', fontSize: '12px', letterSpacing: '2px', marginBottom: '8px' }}>
+          *** YOUTUBE API QUOTA EXCEDIDA ***
+        </p>
+        <p style={{ color: 'var(--text-dim)', fontSize: '11px', letterSpacing: '1px' }}>
+          Reset automático às 08:00 UTC · 05:00 BRT
+        </p>
       </div>
     )
   }

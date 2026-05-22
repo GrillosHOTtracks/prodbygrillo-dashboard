@@ -28,26 +28,32 @@ function apiToLocal(v: ApiVideo): Video {
 
 // ─── Channel banner ───────────────────────────────────────────────────────────
 function ChannelBanner({ info }: { info: ChannelInfo }) {
+  const seeded = info._seeded
   return (
     <div style={{ display: 'flex', gap: '20px', alignItems: 'center', flexWrap: 'wrap' }}>
       <pre style={{ margin: 0, fontSize: '11px', color: 'var(--text-dim)', lineHeight: '1.7' }}>{
 `*** CHANNEL INFO ***
-nick    : ${info.name}
-handle  : ${info.handle}
+nick    : ${info.name || '...'}
+handle  : ${info.handle || '...'}
 country : ${info.country}
-joined  : ${info.publishedAt?.slice(0, 10) ?? 'N/A'}`
+joined  : ${info.publishedAt?.slice(0, 10) || 'N/A'}`
       }</pre>
       <div style={{ flex: 1, display: 'flex', gap: '28px', flexWrap: 'wrap', paddingLeft: '20px', borderLeft: '1px solid var(--border)' }}>
         {[
-          { label: 'SUBSCRIBERS',  value: fmtNum(info.subscribers) },
-          { label: 'TOTAL VIEWS',  value: fmtNum(info.totalViews) },
-          { label: 'TOTAL VIDEOS', value: info.totalVideos.toString() },
+          { label: 'SUBSCRIBERS',  value: seeded && !info.subscribers ? '—' : fmtNum(info.subscribers) },
+          { label: 'TOTAL VIEWS',  value: seeded && !info.totalViews  ? '—' : fmtNum(info.totalViews)  },
+          { label: 'TOTAL VIDEOS', value: seeded && !info.totalVideos ? '—' : info.totalVideos.toString() },
         ].map(stat => (
           <div key={stat.label}>
             <p style={{ color: 'var(--text-dim)', fontSize: '10px', letterSpacing: '1px', margin: 0 }}>{stat.label}</p>
-            <p style={{ color: 'var(--text-bright)', fontSize: '22px', fontWeight: 'bold', margin: '2px 0 0', letterSpacing: '1px' }}>{stat.value}</p>
+            <p style={{ color: seeded ? 'var(--text-faint)' : 'var(--text-bright)', fontSize: '22px', fontWeight: 'bold', margin: '2px 0 0', letterSpacing: '1px' }}>{stat.value}</p>
           </div>
         ))}
+        {seeded && (
+          <p style={{ color: 'var(--text-faint)', fontSize: '10px', alignSelf: 'center', margin: 0 }}>
+            ⟳ dados reais disponíveis após reset de quota (08:00 UTC)
+          </p>
+        )}
       </div>
     </div>
   )

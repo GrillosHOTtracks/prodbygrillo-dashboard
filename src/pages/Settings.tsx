@@ -102,7 +102,7 @@ export function Settings({ onLogout }: { authenticated?: boolean; onLogout?: () 
                 fontSize: '10px', margin: '4px 0 0', letterSpacing: '0.5px',
               }}>
                 {oauth.quotaExceeded
-                  ? '⚠ QUOTA EXCEDIDA — aguarde reset 03:00 BRT'
+                  ? '⚠ QUOTA EXCEDIDA — reset 05:00 BRT / 08:00 UTC'
                   : oauth.authenticated
                   ? '✓ CONECTADO'
                   : '✗ NÃO CONECTADO'}

@@ -84,14 +84,18 @@ app.get('/api/health', (_req, res) => {
     // Only seed if no cache at all — never overwrite real API data
     if (!existing) {
       const seed = {
-        id: cid,
+        id:              cid,
         uploadsPlaylist: upid || ('UU' + cid.slice(2)),
-        name: '', handle: '', description: '', thumbnail: '',
-        country: 'BR', publishedAt: '',
-        subscribers: 0, totalViews: 0, totalVideos: 0,
+        name:        process.env.CHANNEL_NAME   || '',
+        handle:      process.env.CHANNEL_HANDLE || '',
+        description: '', thumbnail: '',
+        country:     'BR', publishedAt: '',
+        subscribers: parseInt(process.env.CHANNEL_SUBS   || '0'),
+        totalViews:  parseInt(process.env.CHANNEL_VIEWS  || '0'),
+        totalVideos: parseInt(process.env.CHANNEL_VIDEOS || '0'),
         _seeded: true,
       }
-      try { fs.writeFileSync(cacheFile, JSON.stringify(seed)); console.log('[SERVER] Channel cache seeded from CHANNEL_ID env') } catch {}
+      try { fs.writeFileSync(cacheFile, JSON.stringify(seed)); console.log('[SERVER] Channel cache seeded from env vars') } catch {}
     }
   }
 }
