@@ -75,7 +75,6 @@ router.get('/', async (req, res) => {
     // Step 2: playlistItems + videos.list — use API keys (no OAuth required)
     const result = await accountManager.withPublicYouTube(async (auth) => {
       const youtube = google.youtube({ version: 'v3', auth })
-      const ya      = google.youtubeAnalytics({ version: 'v2', auth: accountManager.getAuthClient() })
 
       // 2a. Get video IDs from uploads playlist (1 quota unit)
       const playlistRes = await youtube.playlistItems.list({
@@ -105,6 +104,7 @@ router.get('/', async (req, res) => {
 
       // 2c. Per-video analytics via OAuth (YouTube Analytics API — separate quota)
       try {
+        const ya = google.youtubeAnalytics({ version: 'v2', auth: accountManager.getAuthClient() })
         const analyticsParams = {
           ids: 'channel==MINE',
           startDate: '2020-01-01',

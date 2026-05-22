@@ -179,15 +179,12 @@ export default function App() {
       .then(setTrending)
       .catch(err => { console.warn('[trending]', err?.message || err) })
       .finally(() => setTrendingLoading(false))
-    api.audience(dateRange).then(setAudienceData).catch(err => {
-      console.warn('[audience]', err?.message || err)
-    })
     api.revenueMonthly().then(r => setRevenueMonthly(r.data)).catch(err => {
       console.warn('[revenue-monthly]', err?.message || err)
     })
   }, [authenticated])
 
-  // Fetch analytics when range changes
+  // Fetch analytics + audience when range changes
   useEffect(() => {
     if (!authenticated) return
     setAnalyticsLoading(true)
@@ -197,6 +194,9 @@ export default function App() {
       .finally(() => setAnalyticsLoading(false))
     api.traffic(dateRange).then(r => setTrafficSources(r.data)).catch(err => {
       console.warn('[traffic]', err?.message || err)
+    })
+    api.audience(dateRange).then(setAudienceData).catch(err => {
+      console.warn('[audience]', err?.message || err)
     })
   }, [authenticated, dateRange])
 
