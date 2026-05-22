@@ -133,6 +133,46 @@ function sanitizeJsonStrings(raw) {
   return result
 }
 
+// ─── Assemble description server-side — ensures correct format regardless of model ──
+function buildDescription(parsed, beatName, detectedBpm, detectedKey) {
+  const artists  = (parsed.trendingComparison?.matchingArtists || []).slice(0, 3).join(' x ')
+  const bpm      = detectedBpm ?? parsed.bpm ?? null
+  const key      = detectedKey ?? parsed.key ?? null
+  const bpmLine  = [bpm ? `${bpm} BPM` : null, key || null].filter(Boolean).join(' | ') || '[BPM] BPM | [KEY]'
+  const hashtags = (parsed.hashtags || []).join(' ')
+
+  return [
+    `🦗 ${artists} Type Beat - ${beatName} prodbygrillo`,
+    '',
+    '💰 BUY (Untagged): https://www.beatstars.com/prodbygrillo',
+    '',
+    `🎵 ${bpmLine}`,
+    '',
+    '📋 LEASING:',
+    '* MP3 Lease - $24.99',
+    '',
+    '📩 Custom beats & exclusives: DM @prodbygrillo',
+    '',
+    '━━━━━━━━━━━━━━━━━━━',
+    '🚫 TERMS OF USE 🚫',
+    '━━━━━━━━━━━━━━━━━━━',
+    '✅ FREE for non-profit use only',
+    '✅ MUST credit prodbygrillo in the title',
+    '✅ MUST tag @prodbygrillo on social media',
+    '❌ NO monetization without purchasing a lease',
+    '❌ NO distribution to Spotify/Apple Music without lease',
+    '❌ NO selling, leasing or transferring this beat',
+    '',
+    '━━━━━━━━━━━━━━━━━━━',
+    '🔗 FOLLOW',
+    '━━━━━━━━━━━━━━━━━━━',
+    '📱 TikTok: @prodbygrillo',
+    '📷 Instagram: @prodbygrillo',
+    '🛒 BeatStars: beatstars.com/prodbygrillo',
+    ...(hashtags ? ['', hashtags] : []),
+  ].join('\n')
+}
+
 function buildPrompt(beatName, detectedBpm, detectedKey) {
   const now    = new Date()
   const month  = now.toLocaleString('en-US', { month: 'long' })
@@ -316,7 +356,12 @@ router.post('/analyze-beat', async (req, res) => {
     // Repair malformed JSON from the model (unescaped quotes, missing commas,
     // bare newlines in strings, etc.) then validate the result
     try { JSON.parse(clean) } catch { clean = jsonrepair(clean) }
-    JSON.parse(clean)
+
+    // Override description with server-built version — guaranteed correct format
+    // regardless of which model generated the response
+    const parsed = JSON.parse(clean)
+    parsed.description = buildDescription(parsed, beatName.trim(), detectedBpm, detectedKey)
+    clean = JSON.stringify(parsed)
 
     // Re-stream in chunks so the frontend terminal shows the build-up effect
     const CHUNK = 60
