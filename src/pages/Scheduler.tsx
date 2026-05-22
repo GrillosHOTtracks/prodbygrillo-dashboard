@@ -331,6 +331,7 @@ export function Scheduler() {
               setEditTags(parsed.tags.join(', '))
               setEditHashtags(parsed.hashtags.join(' '))
               setAiStatus('done')
+              setStep(3)
             } catch { throw new Error('Resposta da IA inválida — tenta novamente.') }
             break outer
           }
@@ -736,12 +737,18 @@ export function Scheduler() {
                 </div>
               </div>
 
-              {/* Proceed to publish */}
-              <button onClick={() => setStep(3)} style={{
-                width: '100%', padding: '12px', backgroundColor: '#00ff00', color: '#000000',
-                border: 'none', cursor: 'pointer', fontFamily: 'Courier New, monospace',
-                fontSize: '13px', fontWeight: 'bold', letterSpacing: '2px',
-              }}>[ AVANÇAR PARA PUBLICAÇÃO → ]</button>
+              {/* Re-analyze button */}
+              <div style={{ textAlign: 'center' }}>
+                <button
+                  onClick={() => analyze(beatName.trim())}
+                  style={{ ...retro, color: '#00aa00', border: '1px solid #1a3a1a', padding: '8px 20px', fontSize: '11px' }}
+                  onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = '#00ff00'; (e.currentTarget as HTMLElement).style.borderColor = '#00aa00' }}
+                  onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = '#00aa00'; (e.currentTarget as HTMLElement).style.borderColor = '#1a3a1a' }}
+                >
+                  [ ANALISAR NOVAMENTE — GERAR NOVOS TÍTULOS ]
+                </button>
+                <p style={{ color: '#2a2a2a', fontSize: '9px', margin: '4px 0 0', letterSpacing: '1px' }}>IA usa ângulo diferente a cada análise · nunca repete</p>
+              </div>
             </div>
           )}
         </div>
@@ -750,7 +757,7 @@ export function Scheduler() {
       {/* ══════════════════════════════════════════════════════════
           ETAPA 3 — PUBLICAÇÃO
       ══════════════════════════════════════════════════════════ */}
-      {step >= 3 && showResults && (
+      {showResults && (
         <>
           {/* ── YouTube ── */}
           <div style={panel}>

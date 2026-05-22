@@ -80,16 +80,39 @@ function sanitizeJsonStrings(raw) {
 }
 
 function buildPrompt(beatName) {
-  const now   = new Date()
-  const month = now.toLocaleString('en-US', { month: 'long' })
-  const year  = now.getFullYear()
+  const now    = new Date()
+  const month  = now.toLocaleString('en-US', { month: 'long' })
+  const year   = now.getFullYear()
+  const seed   = Math.random().toString(36).slice(2, 10)
+  const angles = [
+    'focus on viral short-form potential and TikTok crossover artists',
+    'focus on underground SoundCloud artists and niche communities',
+    'focus on mainstream chart-topping artists and radio-friendly keywords',
+    'focus on international markets — UK drill, Afrobeats crossover, Latin trap',
+    'focus on emerging artists with under 1M monthly listeners who match this vibe',
+    'focus on classic influential artists that still drive search volume in this niche',
+    'focus on producers with similar sound — producer tags and beatmaker community keywords',
+    'focus on playlist placement keywords and Spotify editorial pitching language',
+  ]
+  const angle = angles[Math.floor(Math.random() * angles.length)]
 
-  return `You are an expert in YouTube SEO and digital marketing for beat producers, with deep knowledge of the RnB, PluggnB, and Melodic Trap niche.
+  return `You are an expert in YouTube SEO and digital marketing for beat producers, with encyclopedic knowledge of RnB, PluggnB, Melodic Trap, Drill, Afrobeats, and all instrumental/type-beat subgenres.
+
+VARIATION SEED: ${seed}
+CREATIVE ANGLE FOR THIS ANALYSIS: ${angle}
+
+You MUST produce a completely unique analysis every time. Never reuse titles, tags, or suggestions from previous analyses. The seed and angle above must influence your output in a measurable way.
 
 Analyze the following beat name for a YouTube upload:
 "${beatName}"
 
-Context: it is ${month} ${year}. Focus on current trends in the niche.
+Context: it is ${month} ${year}. You have deep knowledge of:
+- Current trending artists across all subgenres of trap, RnB, PluggnB, melodic rap
+- YouTube instrumental/type beat channel strategies (how top producers title, tag, and describe beats)
+- Beatmaker community keywords: "free type beat", "instrumental", "loop kit", "sample pack"
+- Which artists are currently hot in the streets vs charting on Billboard vs trending on TikTok
+- How to write descriptions that rank for long-tail searches AND satisfy the YouTube algorithm
+- The difference between "type beat" keyword clustering vs. artist-specific search intent
 
 Return ONLY valid JSON, no markdown, no extra text. Use this exact structure:
 

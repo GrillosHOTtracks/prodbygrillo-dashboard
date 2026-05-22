@@ -20,7 +20,10 @@ if (!fs.existsSync(DATA_FILE)) fs.writeFileSync(DATA_FILE, '[]')
 
 const upload = multer({
   dest: TMP_DIR,
-  limits: { fileSize: 2 * 1024 * 1024 * 1024 }, // 2 GB
+  limits: {
+    fileSize:  2 * 1024 * 1024 * 1024, // 2 GB
+    fieldSize: 20 * 1024 * 1024,        // 20 MB — AI descriptions + base64 thumbnail
+  },
   fileFilter: (_req, file, cb) => {
     if (file.mimetype.startsWith('video/')) cb(null, true)
     else cb(new Error('Apenas arquivos de vídeo são aceitos'))
