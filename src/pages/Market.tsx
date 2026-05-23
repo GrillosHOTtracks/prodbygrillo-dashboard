@@ -803,7 +803,7 @@ function CardComments({ data, loading }: { data: CommentInsights | null; loading
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 
-export function Market({ onNavigate, onUseInScheduler }: {
+export function Market({ onNavigate: _onNavigate, onUseInScheduler }: {
   onNavigate?:       (page: Page) => void
   onUseInScheduler?: (ctx: MarketContext) => void
 }) {

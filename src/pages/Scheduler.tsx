@@ -207,8 +207,9 @@ export function Scheduler({ onNavigate, presetArtist, onPresetConsumed, marketCo
   const [thumbFile, setThumbFile]     = useState<File | null>(null)
   const [thumbPreview, setThumbPreview] = useState<string | null>(null)
   const [beatName, setBeatName]       = useState(
-    marketContext?.title ?? (marketContext?.artist ? `${marketContext.artist} Type Beat` : '') ||
-    (presetArtist ? `${presetArtist} Type Beat` : '')
+    marketContext?.title
+    ?? (marketContext?.artist ? `${marketContext.artist} Type Beat` : undefined)
+    ?? (presetArtist ? `${presetArtist} Type Beat` : '')
   )
   const videoInputRef                 = useRef<HTMLInputElement>(null)
   const thumbInputRef                 = useRef<HTMLInputElement>(null)
