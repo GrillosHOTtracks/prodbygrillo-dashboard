@@ -183,18 +183,30 @@ router.post('/publish', upload.single('audio'), async (req, res) => {
     if (!fileInput) throw new Error('Campo de upload não encontrado — ver logs do Railway')
     await fileInput.uploadFile(audioPath)
 
-    // Wait for navigation to new track edit page: /content/tracks/new/TK*
+    // Wait for navigation to track edit page (/new/ or /edit/)
     sse(res, { status: 'UPLOADING_AUDIO', message: 'Aguardando processamento do áudio...' })
     await page.waitForFunction(
-      () => window.location.href.includes('/tracks/new/'),
+      () => /\/tracks\/(new|edit)\/TK/.test(window.location.href),
       { timeout: 60000, polling: 1000 }
     )
     console.log('[BEATSTARS] Track page:', page.url())
 
-    // Wait for Angular Material form to fully initialize (chip inputs must exist)
+    // Wait for Angular Material form to initialize
     await page.waitForSelector('#title', { timeout: 15000 })
     await page.waitForSelector('#mat-mdc-chip-list-input-1', { timeout: 10000 })
-    await new Promise(r => setTimeout(r, 4000))
+
+    // Wait for BeatStars to finish async audio analysis before filling
+    // (when "Autofill metadata" becomes enabled, processing is done and our values won't be overwritten)
+    sse(res, { status: 'UPLOADING_AUDIO', message: 'Aguardando análise do áudio pelo BeatStars...' })
+    await page.waitForFunction(() => {
+      const btn = Array.from(document.querySelectorAll('button')).find(b =>
+        /autofill\s*metadata/i.test(b.textContent))
+      return btn && !btn.disabled
+    }, { timeout: 60000 }).catch(() => {
+      // If "Autofill metadata" never enables, just wait 6s and proceed
+      return new Promise(r => setTimeout(r, 6000))
+    })
+    await new Promise(r => setTimeout(r, 1000))
 
     // ── Fill form ────────────────────────────────────────────────────────────────
     sse(res, { status: 'FILLING_FORM', message: 'Preenchendo informações do beat...' })
