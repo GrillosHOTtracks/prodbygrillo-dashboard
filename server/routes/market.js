@@ -126,7 +126,7 @@ async function searchYT(query, gl, hl = 'en') {
         const title   = v.title?.runs?.map(r => r.text).join('') || ''
         const channel = v.ownerText?.runs?.[0]?.text || v.longBylineText?.runs?.[0]?.text || ''
         const vcRaw   = v.viewCountText?.simpleText ?? v.viewCountText?.runs?.[0]?.text ?? ''
-        const obj = { title, channel, views: parseViews(vcRaw) }
+        const obj = { title, channel, views: parseViews(vcRaw), videoId: v.videoId }
         if (!isJunk(obj)) items.push(obj)
       }
     }
@@ -209,9 +209,9 @@ function aggregateResults(results) {
       nacc.total += items.length
       nacc.byMarket[gl] = (nacc.byMarket[gl] || 0) + items.length
       const mkt = MARKET_MAP[gl] || MARKETS[0]
-      for (const { title, channel, views } of items) {
+      for (const { title, channel, views, videoId } of items) {
         if (channel) nacc.artists.add(channel)
-        nacc.sampleRaw.push({ title, channel, views, flag: mkt.flag, market: mkt.label })
+        nacc.sampleRaw.push({ title, channel, views, videoId, flag: mkt.flag, market: mkt.label })
         macc.total++
         macc.byNiche[nicheId] = (macc.byNiche[nicheId] || 0) + 1
         if (channel) macc.artists.add(channel)
@@ -304,6 +304,8 @@ function buildCatalog() {
 }
 
 // ─── LAIS — só responde com dados reais ──────────────────────────────────────
+
+console.log(`[market] GROQ_API_KEY: ${process.env.GROQ_API_KEY ? '✓ configurada' : '✗ NÃO CONFIGURADA — LAIS desactivada'}`)
 
 async function analyzeWithLAIS(trending) {
   const apiKey = process.env.GROQ_API_KEY

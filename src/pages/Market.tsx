@@ -8,6 +8,7 @@ interface VideoItem {
   views:   number
   flag:    string
   market:  string
+  videoId?: string
 }
 
 interface HotMarket { gl: string; flag: string; label: string; count: number }
@@ -118,17 +119,15 @@ function CardTrending({ niches, markets, typeBeat, hottestNiche, hottestMarket }
   const [tab, setTab]             = useState<TrendingTab>('videos')
   const [filterNiche, setFilter]  = useState<string>('all')
   const [minViews, setMinViews]   = useState<number>(0)
+  const [hoveredIdx, setHovered]  = useState<number | null>(null)
 
   const maxNicheTotal = niches[0]?.total || 1
   const maxMktTotal   = markets[0]?.total || 1
   const noData        = niches.every(n => n.total === 0)
 
-  // Header reflects current filter context
-  const ctxNiche  = filterNiche === 'all'
-    ? niches.find(n => n.id === hottestNiche)
-    : niches.find(n => n.id === filterNiche)
-  const ctxLabel  = ctxNiche?.label  || hottestNiche
-  const ctxMarket = filterNiche === 'all' ? hottestMarket : (ctxNiche?.hotMarket ?? hottestMarket)
+  // Header context: ALL = global totals, specific = that niche's hot market
+  const ctxNiche  = filterNiche === 'all' ? null : niches.find(n => n.id === filterNiche)
+  const ctxMarket = ctxNiche?.hotMarket ?? null
 
   // Flat video list: global sort by views desc, then apply niche + views filters
   const allVideos: (VideoItem & { nicheLabel: string })[] = niches
@@ -157,11 +156,17 @@ function CardTrending({ niches, markets, typeBeat, hottestNiche, hottestMarket }
         <p style={heading}>┌─ TENDÊNCIAS GLOBAIS ────────────</p>
         {noData ? (
           <p style={{ ...lbl, color: 'var(--text-faint)' }}>a pesquisar — aguarda cache</p>
+        ) : filterNiche === 'all' ? (
+          <p style={{ ...lbl, margin: 0 }}>
+            <span style={{ color: 'var(--accent)' }}>TODOS OS NICHOS</span>
+            &nbsp;·&nbsp;<span style={{ color: 'var(--accent)' }}>TODOS OS MERCADOS</span>
+            &nbsp;·&nbsp;<span style={{ opacity: 0.6 }}>{filteredVideos.length} vídeos</span>
+          </p>
         ) : (
           <p style={{ ...lbl, margin: 0 }}>
-            nicho: <span style={{ color: 'var(--accent)' }}>{ctxLabel}</span>
-            &nbsp;·&nbsp;mercado: <span style={{ color: 'var(--accent)' }}>{ctxMarket.flag} {ctxMarket.label}</span>
-            &nbsp;·&nbsp;<span style={{ opacity: 0.7 }}>{filteredVideos.length} vídeos</span>
+            nicho: <span style={{ color: 'var(--accent)' }}>{ctxNiche?.label}</span>
+            {ctxMarket && <>&nbsp;·&nbsp;mercado: <span style={{ color: 'var(--accent)' }}>{ctxMarket.flag} {ctxMarket.label}</span></>}
+            &nbsp;·&nbsp;<span style={{ opacity: 0.6 }}>{filteredVideos.length} vídeos</span>
           </p>
         )}
       </div>
@@ -222,35 +227,66 @@ function CardTrending({ niches, markets, typeBeat, hottestNiche, hottestMarket }
           </div>
 
           {/* Scrollable video list */}
-          <div style={{ overflowY: 'auto', flex: 1, maxHeight: 300, display: 'flex', flexDirection: 'column', gap: 0 }}>
+          <div style={{ overflowY: 'auto', flex: 1, maxHeight: 340, scrollBehavior: 'smooth' }}>
             {filteredVideos.length === 0 ? (
               <p style={{ color: 'var(--text-faint)', fontSize: '10px', padding: '8px 0' }}>sem vídeos</p>
             ) : filteredVideos.map((v, i) => (
-              <div key={i} style={{
-                display: 'grid',
-                gridTemplateColumns: '18px 1fr auto auto',
-                gap: '6px',
-                alignItems: 'center',
-                padding: '5px 0',
-                borderBottom: '1px solid var(--border)',
-                opacity: 0.92,
-              }}>
-                <span style={{ color: 'var(--text-faint)', fontSize: '8px', textAlign: 'right' }}>
+              <div
+                key={i}
+                onMouseEnter={() => setHovered(i)}
+                onMouseLeave={() => setHovered(null)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  padding: '6px 4px',
+                  borderBottom: '1px solid var(--border)',
+                  backgroundColor: hoveredIdx === i ? 'rgba(0,255,0,0.04)' : 'transparent',
+                  transition: 'background-color 0.12s',
+                  cursor: 'default',
+                }}
+              >
+                {/* Rank */}
+                <span style={{ color: 'var(--text-faint)', fontSize: '8px', width: 16, flexShrink: 0, textAlign: 'right' }}>
                   {String(i + 1).padStart(2, '0')}
                 </span>
-                <div style={{ overflow: 'hidden' }}>
-                  <p style={{ color: 'var(--text-bright)', fontSize: '10px', margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+
+                {/* Thumbnail */}
+                {v.videoId ? (
+                  <img
+                    src={`https://i.ytimg.com/vi/${v.videoId}/mqdefault.jpg`}
+                    alt=""
+                    style={{ width: 48, height: 27, objectFit: 'cover', flexShrink: 0, opacity: 0.85 }}
+                  />
+                ) : (
+                  <div style={{ width: 48, height: 27, flexShrink: 0, backgroundColor: 'var(--border)', opacity: 0.3 }} />
+                )}
+
+                {/* Title + channel */}
+                <div style={{ flex: 1, overflow: 'hidden', minWidth: 0 }}>
+                  <p style={{ color: '#00ff00', fontSize: '10px', margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {v.title}
                   </p>
-                  <p style={{ color: 'var(--text-faint)', fontSize: '9px', margin: 0 }}>
+                  <p style={{ color: '#555555', fontSize: '9px', margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {v.channel}
-                    {filterNiche === 'all' && <span style={{ marginLeft: 6, opacity: 0.5 }}>{v.nicheLabel}</span>}
+                    {filterNiche === 'all' && <span style={{ marginLeft: 6, opacity: 0.6 }}>{v.nicheLabel}</span>}
                   </p>
                 </div>
-                <span style={{ color: 'var(--accent)', fontSize: '9px', fontWeight: 'bold', flexShrink: 0 }}>
+
+                {/* Views */}
+                <span style={{ color: 'var(--accent)', fontSize: '9px', fontWeight: 'bold', flexShrink: 0, minWidth: 36, textAlign: 'right' }}>
                   {fmtNum(v.views)}
                 </span>
-                <span style={{ fontSize: '11px', flexShrink: 0 }}>{v.flag}</span>
+
+                {/* Flag badge */}
+                <span style={{
+                  fontSize: '10px', flexShrink: 0,
+                  padding: '1px 4px',
+                  border: '1px solid var(--border)',
+                  backgroundColor: hoveredIdx === i ? 'rgba(0,255,0,0.06)' : 'transparent',
+                }}>
+                  {v.flag}
+                </span>
               </div>
             ))}
           </div>
