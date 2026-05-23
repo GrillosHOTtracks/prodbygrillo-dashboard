@@ -45,35 +45,6 @@ const retroBtn: React.CSSProperties = {
 const VALID_PAGES: Page[] = ['overview', 'videos', 'analytics', 'audience', 'revenue', 'plan', 'scheduler', 'beatstore', 'market', 'settings']
 const DAYS_PT = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado']
 
-function extractTypeBeatArtist(title: string): string | null {
-  const m = title.match(/^(.+?)\s+(?:free\s+)?type[\s-]?beat\b/i)
-  if (!m) return null
-  let artist = m[1]
-    .replace(/^\[?free\]?\s*/i, '')
-    .replace(/^\[.*?\]\s*/, '')
-    .replace(/^\(.*?\)\s*/, '')
-    .replace(/[-|–—:]\s*$/, '')
-    .trim()
-  if (!artist || artist.length < 2 || artist.length > 40) return null
-  if (/^(trap|drill|rnb|r&b|free|dark|melodic|hard|sad|chill|phonk|rap|hip\s*hop|free\s*beat|beat|instrumental|type|new|latest|hot|official)$/i.test(artist)) return null
-  if (/^\d/.test(artist)) return null
-  return artist.split(/\s+[xX×&]\s+/)[0].trim() || null
-}
-
-function extractArtists(niches: Array<{ sample: Array<{ title: string }> }>): string[] {
-  const freq: Record<string, number> = {}
-  for (const niche of niches) {
-    for (const v of (niche.sample ?? [])) {
-      const a = extractTypeBeatArtist(v.title)
-      if (a) freq[a] = (freq[a] ?? 0) + 1
-    }
-  }
-  return Object.entries(freq)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 10)
-    .map(([name]) => name)
-}
-
 function sanitizePage(p: unknown): Page | undefined {
   return VALID_PAGES.includes(p as Page) ? (p as Page) : undefined
 }
@@ -182,6 +153,7 @@ export function Plan({ channelInfo, analyticsData, videos, onNavigate }: PlanPro
 
   const [engagement, setEngagement]   = useState<EngagementItem[] | null>(null)
   const [engLoading, setEngLoading]   = useState(false)
+  const [engError, setEngError]       = useState('')
   const [engDone, setEngDone]         = useState<Record<string, boolean>>({})
 
   const today = todayStr()
@@ -311,14 +283,15 @@ REGRAS: máximo 7 itens · IDs únicos em kebab-case sem repetir os de ontem · 
   const fetchEngagement = useCallback(async (bust = false) => {
     if (engLoading) return
     setEngLoading(true)
+    setEngError('')
 
     try {
-      // Step 1: get market data to extract trending artists
+      // Step 1: get market data — use pre-extracted referenceArtists from server
       const mRes = await fetch('/api/market')
       if (!mRes.ok) throw new Error(`market HTTP ${mRes.status}`)
       const mData = await mRes.json()
 
-      const artists = extractArtists(mData.niches as Array<{ sample: Array<{ title: string }> }>)
+      const artists: string[] = mData.typeBeat?.referenceArtists ?? []
       if (!artists.length) throw new Error('Sem artistas no mercado — abre a aba MERCADO primeiro')
 
       // On bust: shuffle to rotate through different artists
@@ -377,6 +350,7 @@ Reply ONLY in valid JSON (no markdown, no text before or after):
       localStorage.setItem(`engagement_${today}`, JSON.stringify(result))
     } catch (err: any) {
       console.warn('[engagement]', err.message)
+      setEngError(err.message)
     } finally {
       setEngLoading(false)
     }
@@ -582,6 +556,13 @@ Reply ONLY in valid JSON (no markdown, no text before or after):
           <div style={{ textAlign: 'center', padding: '20px' }}>
             <p style={{ color: '#333333', fontSize: '11px', margin: 0 }}>{'█'.repeat(10)}<span className="blink">█</span></p>
             <p style={{ color: '#2a2a2a', fontSize: '10px', margin: '8px 0 0', letterSpacing: '1px' }}>LAIS a selecionar vídeos do nicho...</p>
+          </div>
+        )}
+
+        {/* Engagement error */}
+        {engError && !engLoading && (
+          <div style={{ padding: '8px 12px', backgroundColor: '#0a0000', border: '1px solid #330000', marginBottom: '8px' }}>
+            <p style={{ color: '#ff4400', fontSize: '10px', margin: 0, letterSpacing: '0.5px' }}>ERRO: {engError}</p>
           </div>
         )}
 
