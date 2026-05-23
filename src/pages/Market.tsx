@@ -37,9 +37,10 @@ interface TypeBeatResult {
 }
 
 interface LaisData {
-  pulseMercado: string
-  proximoBeat:  string
-  tendencia:    string
+  oportunidade:  { artista: string; nicho: string; mercado: string; porque: string }
+  fazerAgora:    { titulo: string; bpm: number | string; tom: string }
+  insights:      { nichoCrescendo: string; artistaSubindo: string; evitar: string }
+  mercadoQuente: string
 }
 
 interface MarketData {
@@ -381,10 +382,12 @@ function CardTrending({ niches, markets, typeBeat }: {
 
 // ─── Card 2: LAIS ─────────────────────────────────────────────────────────────
 
-function CardLAIS({ data }: { data: LaisData | null }) {
+function CardLAIS({ data, onSchedule }: { data: LaisData | null; onSchedule?: (title: string) => void }) {
+  const [btnHover, setBtnHover] = useState(false)
+
   if (!data) return (
     <div style={card}>
-      <p style={heading}>┌─ LAIS · INTELIGÊNCIA DE MERCADO ─</p>
+      <p style={heading}>┌─ LAIS · RADAR DE MERCADO ─</p>
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         <p style={{ color: 'var(--text-faint)', fontSize: '10px', letterSpacing: '1px' }}>
           GROQ_API_KEY NÃO CONFIGURADA
@@ -393,32 +396,80 @@ function CardLAIS({ data }: { data: LaisData | null }) {
     </div>
   )
 
-  const sections = [
-    { key: '📡 MERCADO ESTA SEMANA', text: data.pulseMercado },
-    { key: '🔥 PRÓXIMO BEAT RECOMENDADO', text: data.proximoBeat },
-    { key: '📈 TENDÊNCIA EM CRESCIMENTO', text: data.tendencia },
-  ]
+  const sectionLbl: React.CSSProperties = { ...lbl, color: 'var(--accent)', marginBottom: 6 }
 
   return (
     <div style={card}>
-      <p style={heading}>┌─ LAIS · INTELIGÊNCIA DE MERCADO ─</p>
-      {sections.map((s, i) => (
-        <div key={i} style={{ padding: '12px', backgroundColor: i === 1 ? 'var(--accent-muted)' : '#0a0a0a', border: `1px solid ${i === 1 ? 'var(--accent-border)' : 'var(--border)'}` }}>
-          <p style={{ ...lbl, marginBottom: 6, color: i === 1 ? 'var(--accent)' : 'var(--text-faint)' }}>
-            {s.key}
+      <p style={heading}>┌─ LAIS · RADAR DE MERCADO ─</p>
+
+      {/* 🎯 OPORTUNIDADE */}
+      <div style={{ padding: '12px', backgroundColor: 'var(--accent-muted)', border: '1px solid var(--accent-border)' }}>
+        <p style={sectionLbl}>🎯 OPORTUNIDADE DA SEMANA</p>
+        <p style={{ color: 'var(--text-bright)', fontSize: '11px', margin: '0 0 4px', fontWeight: 'bold' }}>
+          {data.oportunidade.artista}&nbsp;·&nbsp;{data.oportunidade.nicho}&nbsp;·&nbsp;{data.oportunidade.mercado}
+        </p>
+        <p style={{ color: 'var(--text-dim)', fontSize: '10px', margin: 0, lineHeight: 1.6 }}>
+          Por quê: {data.oportunidade.porque}
+        </p>
+      </div>
+
+      {/* ⚡ FAZER AGORA */}
+      <div style={{ padding: '12px', backgroundColor: '#0a0a0a', border: '1px solid var(--border)' }}>
+        <p style={{ ...lbl, color: '#ffcc00', marginBottom: 6 }}>⚡ FAZER AGORA</p>
+        <p style={{ color: '#00ff00', fontSize: '11px', margin: '0 0 4px', fontStyle: 'italic' }}>
+          "{data.fazerAgora.titulo}"
+        </p>
+        <p style={{ color: 'var(--text-faint)', fontSize: '10px', margin: '0 0 8px' }}>
+          BPM sugerido: <span style={{ color: 'var(--text-dim)' }}>{data.fazerAgora.bpm}</span>
+          &nbsp;|&nbsp;Tom: <span style={{ color: 'var(--text-dim)' }}>{data.fazerAgora.tom}</span>
+        </p>
+        {onSchedule && (
+          <button
+            onClick={() => onSchedule(data.fazerAgora.titulo)}
+            onMouseEnter={() => setBtnHover(true)}
+            onMouseLeave={() => setBtnHover(false)}
+            style={{
+              background: btnHover ? 'var(--accent-muted)' : 'transparent',
+              border: '1px solid var(--accent-border)',
+              color: 'var(--accent)',
+              fontSize: '10px', padding: '4px 10px',
+              cursor: 'pointer', fontFamily: 'Courier New, monospace',
+              letterSpacing: '1px', transition: 'background 0.12s',
+            }}
+          >[ CRIAR NO SCHEDULER ]</button>
+        )}
+      </div>
+
+      {/* 📊 INSIGHTS */}
+      <div style={{ padding: '12px', backgroundColor: '#0a0a0a', border: '1px solid var(--border)' }}>
+        <p style={{ ...lbl, marginBottom: 8 }}>📊 INSIGHTS</p>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <p style={{ color: 'var(--text-dim)', fontSize: '10px', margin: 0 }}>
+            <span style={{ color: '#00ff00' }}>+</span> Nicho mais quente: {data.insights.nichoCrescendo}
           </p>
-          <p style={{ color: i === 1 ? 'var(--text-bright)' : 'var(--text-dim)', fontSize: '11px', lineHeight: 1.7, margin: 0 }}>
-            {s.text}
+          <p style={{ color: 'var(--text-dim)', fontSize: '10px', margin: 0 }}>
+            <span style={{ color: '#00ff00' }}>+</span> Artista subindo: {data.insights.artistaSubindo}
+          </p>
+          <p style={{ color: 'var(--text-dim)', fontSize: '10px', margin: 0 }}>
+            <span style={{ color: '#ff4444' }}>–</span> Evitar: {data.insights.evitar}
           </p>
         </div>
-      ))}
+      </div>
+
+      {/* 🌍 MERCADO MAIS QUENTE */}
+      <div style={{ padding: '10px 12px', border: '1px solid var(--border)', backgroundColor: '#050505' }}>
+        <p style={{ ...lbl, marginBottom: 4 }}>🌍 MERCADO MAIS QUENTE</p>
+        <p style={{ color: 'var(--text-dim)', fontSize: '10px', margin: 0, lineHeight: 1.6 }}>
+          {data.mercadoQuente}
+        </p>
+      </div>
     </div>
   )
 }
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 
-export function Market() {
+export function Market({ onNavigate }: { onNavigate?: (page: string) => void }) {
   const [data, setData]       = useState<MarketData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError]     = useState('')
@@ -493,7 +544,10 @@ export function Market() {
             markets={data.markets}
             typeBeat={data.typeBeat}
           />
-          <CardLAIS data={data.lais} />
+          <CardLAIS
+            data={data.lais}
+            onSchedule={onNavigate ? (title) => { onNavigate('scheduler') } : undefined}
+          />
         </div>
       ) : null}
 

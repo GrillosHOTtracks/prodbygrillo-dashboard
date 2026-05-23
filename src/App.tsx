@@ -239,7 +239,7 @@ export default function App() {
       case 'beatstore':
         return <BeatStore onNavigate={setPage} />
       case 'market':
-        return <Market />
+        return <Market onNavigate={setPage} />
       case 'settings':
         return <Settings authenticated={authenticated} onLogout={async () => {
           setAuthenticated(false)
