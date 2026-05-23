@@ -309,9 +309,8 @@ function ArtistHub({ artists, onUseInScheduler }: { artists: ArtistTrend[], onUs
                         {i === 0 && <span style={{ fontSize: '9px', color: '#aaff00', padding: '1px 5px', border: '1px solid #aaff0033' }}>💎 TOP OPP</span>}
                       </div>
                       <p style={{ color: 'var(--text-faint)', fontSize: '10px', margin: '2px 0 0' }}>
-                        {a.deezerFans ? `${fmtNum(a.deezerFans)} fãs Deezer` : ''}
-                        {a.spotifyFollowers ? `${a.deezerFans ? ' · ' : ''}${fmtNum(a.spotifyFollowers)} Spotify` : ''}
-                        {!a.deezerFans && !a.spotifyFollowers ? `${a.beatCount} type beats` : ''}
+                        {a.spotifyFollowers ? `${fmtNum(a.spotifyFollowers)} Spotify` : `${a.beatCount} type beats`}
+                        {a.beats7d ? ` · ${a.beats7d} esta semana` : ''}
                       </p>
                     </div>
                   </div>
@@ -336,9 +335,9 @@ function ArtistHub({ artists, onUseInScheduler }: { artists: ArtistTrend[], onUs
                         📈 TRENDS {a.trendsScore}/100
                       </span>
                     )}
-                    {(a.recentBeatsCount ?? 0) > 0 && (
+                    {(a.beats7d ?? 0) > 0 && (
                       <span style={{ fontSize: '9px', padding: '1px 6px', border: '1px solid #ff660033', color: '#ff6600', letterSpacing: '0.5px' }}>
-                        ⚡ {a.recentBeatsCount} RECENTES/30d
+                        ⚡ {a.beats7d} BEATS/7D
                       </span>
                     )}
                     {(a.spotifyPopularity ?? 0) > 0 && (
