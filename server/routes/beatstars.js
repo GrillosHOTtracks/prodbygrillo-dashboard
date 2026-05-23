@@ -189,13 +189,16 @@ router.post('/publish', upload.single('audio'), async (req, res) => {
       () => window.location.href.includes('/tracks/new/'),
       { timeout: 60000, polling: 1000 }
     )
-    await new Promise(r => setTimeout(r, 2000))
     console.log('[BEATSTARS] Track page:', page.url())
+
+    // Wait for Angular Material form to fully initialize (chip inputs must exist)
+    await page.waitForSelector('#title', { timeout: 15000 })
+    await page.waitForSelector('#mat-mdc-chip-list-input-1', { timeout: 10000 })
+    await new Promise(r => setTimeout(r, 4000))
 
     // ── Fill form ────────────────────────────────────────────────────────────────
     sse(res, { status: 'FILLING_FORM', message: 'Preenchendo informações do beat...' })
 
-    // Defaults — every field always gets a value (confirmed selectors 2026-05-22)
     const fillTitle = title || 'Type Beat - prodbygrillo'
     const fillBpm   = bpm   || 140
     const fillKey   = key   || 'Am'
@@ -203,14 +206,29 @@ router.post('/publish', upload.single('audio'), async (req, res) => {
     const fillMood  = mood  || 'Dark'
     const fillDesc  = description || ''
 
-    // Helper: type into chip input and press Enter (tags — no autocomplete)
+    // Helper: clear all existing chips in a list, then add new ones
+    async function clearChips(listSelector) {
+      await page.evaluate(sel => {
+        const input = document.querySelector(sel)
+        if (!input) return
+        const list = input.closest('mat-chip-grid, mat-chip-list, [class*="chip-list"]')
+        if (!list) return
+        list.querySelectorAll('mat-chip-row, mat-chip, [class*="mdc-chip"]').forEach(chip => {
+          const del = chip.querySelector('[class*="chip-remove"], [aria-label*="remove" i], button')
+          if (del && (del.offsetWidth || del.offsetHeight)) del.click()
+        })
+      }, listSelector)
+      await new Promise(r => setTimeout(r, 600))
+    }
+
+    // Helper: type into chip input and press Enter (no autocomplete)
     async function chipEnter(selector, text) {
       const el = await page.$(selector)
       if (!el) return
       await el.click()
-      await page.keyboard.type(text, { delay: 25 })
+      await page.keyboard.type(text, { delay: 30 })
       await page.keyboard.press('Enter')
-      await new Promise(r => setTimeout(r, 350))
+      await new Promise(r => setTimeout(r, 400))
     }
 
     // Helper: type into autocomplete chip, wait for dropdown, click first option
@@ -218,48 +236,58 @@ router.post('/publish', upload.single('audio'), async (req, res) => {
       const el = await page.$(selector)
       if (!el) return
       await el.click()
-      await page.keyboard.type(text, { delay: 25 })
-      await new Promise(r => setTimeout(r, 900))
+      await page.keyboard.type(text, { delay: 30 })
+      await new Promise(r => setTimeout(r, 1000))
       const picked = await page.evaluate(() => {
         const opt = document.querySelector('mat-option:not([aria-disabled="true"]), [role="option"]:not([aria-disabled="true"])')
         if (opt && (opt.offsetWidth || opt.offsetHeight)) { opt.click(); return true }
         return false
       })
       if (!picked) await page.keyboard.press('Escape')
-      await new Promise(r => setTimeout(r, 400))
+      await new Promise(r => setTimeout(r, 500))
     }
 
-    // Title — confirmed: input#title
-    await page.waitForSelector('#title', { timeout: 8000 })
+    // Title
     await page.click('#title', { clickCount: 3 })
-    await page.keyboard.type(fillTitle, { delay: 20 })
-    await new Promise(r => setTimeout(r, 300))
+    await page.keyboard.down('Control')
+    await page.keyboard.press('a')
+    await page.keyboard.up('Control')
+    await page.keyboard.type(fillTitle, { delay: 25 })
+    await page.evaluate(() => {
+      const el = document.querySelector('#title')
+      if (el) { el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })) }
+    })
+    await new Promise(r => setTimeout(r, 400))
+    console.log('[BEATSTARS] Title filled:', fillTitle)
 
-    // Description — confirmed: first textarea
+    // Description
     if (fillDesc) {
       try {
         const textarea = await page.$('textarea')
         if (textarea) {
           await textarea.click({ clickCount: 3 })
           await page.keyboard.type(fillDesc, { delay: 3 })
-          await new Promise(r => setTimeout(r, 300))
+          await new Promise(r => setTimeout(r, 400))
         }
       } catch {}
     }
 
-    // BPM — confirmed: input[type="number"], placeholder="0"
+    // BPM
     try {
       const bpmEl = await page.$('input[type="number"]')
       if (bpmEl) {
         await bpmEl.click({ clickCount: 3 })
-        await page.keyboard.type(String(fillBpm), { delay: 20 })
+        await page.keyboard.type(String(fillBpm), { delay: 25 })
+        await page.evaluate(() => {
+          const el = document.querySelector('input[type="number"]')
+          if (el) { el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })) }
+        })
         await page.keyboard.press('Tab')
-        await new Promise(r => setTimeout(r, 200))
+        await new Promise(r => setTimeout(r, 300))
       }
     } catch {}
 
-    // Key — confirmed: first native <select> with options A♭m, Am, AM, Bm...
-    // Must dispatch change+input events so Angular detects the change
+    // Key — native <select>, Angular needs change+input events
     try {
       const selects = await page.$$('select')
       if (selects[0]) {
@@ -275,27 +303,26 @@ router.post('/publish', upload.single('audio'), async (req, res) => {
             el.dispatchEvent(new Event('input',  { bubbles: true }))
           }
         }, selects[0], fillKey)
-        await new Promise(r => setTimeout(r, 300))
+        await new Promise(r => setTimeout(r, 400))
       }
     } catch {}
 
-    // Tags — confirmed: #mat-mdc-chip-list-input-1, max 3, no autocomplete
+    // Tags — clear BeatStars auto-tags first, then add ours (max 3)
     try {
-      const tagList = fillTags.split(/[,\s]+/).filter(Boolean).slice(0, 3)
+      await clearChips('#mat-mdc-chip-list-input-1')
+      const tagList = fillTags.split(/\s*,\s*/).filter(Boolean).slice(0, 3)
       for (const tag of tagList) {
         await chipEnter('#mat-mdc-chip-list-input-1', tag)
       }
     } catch {}
 
-    // Mood — confirmed: #mat-mdc-chip-list-input-2, autocomplete dropdown
+    // Mood
     try {
+      await clearChips('#mat-mdc-chip-list-input-2')
       await chipAutocomplete('#mat-mdc-chip-list-input-2', fillMood)
     } catch {}
 
-    // Instruments — confirmed: #mat-mdc-chip-list-input-3, autocomplete (optional, skip if no meta)
-    // No default — leave empty to avoid wrong values
-
-    // Thumbnail — "Edit" button on artwork → hidden image file input
+    // Thumbnail
     if (thumbnail && thumbnail.startsWith('data:image')) {
       try {
         const thumbPath = path.join(os.tmpdir(), `bs_thumb_${Date.now()}.jpg`)
@@ -313,8 +340,8 @@ router.post('/publish', upload.single('audio'), async (req, res) => {
       } catch {}
     }
 
-    // Brief pause to let Angular sync all field states before publish
-    await new Promise(r => setTimeout(r, 1500))
+    // Final pause — let Angular sync before publish
+    await new Promise(r => setTimeout(r, 3000))
 
     // ── Publish ───────────────────────────────────────────────────────────────────
     sse(res, { status: 'PUBLISHING', message: 'Publicando beat...' })
