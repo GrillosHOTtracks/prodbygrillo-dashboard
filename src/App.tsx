@@ -9,6 +9,7 @@ import { Revenue } from './pages/Revenue'
 import { Settings } from './pages/Settings'
 import { Scheduler } from './pages/Scheduler'
 import { BeatStore } from './pages/BeatStore'
+import { Market } from './pages/Market'
 import { api } from './lib/api'
 import type { Page, DateRange } from './types'
 import type { DailyRow, ChannelInfo, Video as ApiVideo, AudienceResponse, ArtistTrend, TrafficSource, MonthlyRevenue } from './lib/api'
@@ -237,6 +238,8 @@ export default function App() {
         return <Scheduler onNavigate={setPage} presetArtist={schedulerPreset} onPresetConsumed={() => setSchedulerPreset(undefined)} />
       case 'beatstore':
         return <BeatStore onNavigate={setPage} />
+      case 'market':
+        return <Market />
       case 'settings':
         return <Settings authenticated={authenticated} onLogout={async () => {
           setAuthenticated(false)

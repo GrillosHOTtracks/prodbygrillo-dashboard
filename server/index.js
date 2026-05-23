@@ -21,6 +21,7 @@ try {
   uploadRoutes    = require('./routes/upload')
   instagramRoutes  = require('./routes/instagram')
   beatstarsRoutes  = require('./routes/beatstars')
+  marketRoutes     = require('./routes/market')
   accountManager   = require('./accountManager')
   console.log('[SERVER] All modules loaded OK')
 } catch (err) {
@@ -70,6 +71,7 @@ app.use('/api/ai',        requireAuth, aiRoutes)
 app.use('/api/upload',    requireAuth, uploadRoutes)
 app.use('/api/instagram',  instagramRoutes)
 app.use('/api/beatstars', beatstarsRoutes)
+app.use('/api/market',   requireAuth, marketRoutes)
 
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true, authenticated: accountManager.isAuthenticated(), ts: new Date().toISOString() })

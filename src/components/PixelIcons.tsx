@@ -484,3 +484,28 @@ export function IconAI({ size = 20 }: { size?: number }) {
     </svg>
   )
 }
+
+export function IconMarket({ size = 20 }: { size?: number }) {
+  const crisp = { style: { imageRendering: 'pixelated' as const }, viewBox: '0 0 20 20', fill: 'none' }
+  return (
+    <svg {...crisp} width={size} height={size}>
+      {/* Base line */}
+      <rect x="1" y="17" width="18" height="1" fill="currentColor" opacity="0.5"/>
+      {/* Bar 1 */}
+      <rect x="2"  y="12" width="3" height="5" fill="currentColor" opacity="0.6"/>
+      {/* Bar 2 */}
+      <rect x="7"  y="9"  width="3" height="8" fill="currentColor" opacity="0.8"/>
+      {/* Bar 3 */}
+      <rect x="12" y="5"  width="3" height="12" fill="currentColor"/>
+      {/* Trend arrow */}
+      <rect x="3"  y="11" width="2" height="1" fill="currentColor"/>
+      <rect x="5"  y="9"  width="2" height="1" fill="currentColor"/>
+      <rect x="7"  y="7"  width="2" height="1" fill="currentColor"/>
+      <rect x="9"  y="5"  width="2" height="1" fill="currentColor"/>
+      <rect x="11" y="3"  width="2" height="1" fill="currentColor"/>
+      {/* Arrow head */}
+      <rect x="13" y="2" width="4" height="1" fill="currentColor"/>
+      <rect x="16" y="3" width="1" height="3" fill="currentColor"/>
+    </svg>
+  )
+}
