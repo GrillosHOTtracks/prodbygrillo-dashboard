@@ -98,7 +98,7 @@ function detectKeyFromChroma(chroma: number[]): string {
     const min = KS_MINOR.map((_, i) => KS_MINOR[(i - root + 12) % 12])
     const cMaj = pearson(chroma, maj)
     const cMin = pearson(chroma, min)
-    if (cMaj > bestCorr) { bestCorr = cMaj; bestKey = NOTE_NAMES[root] }
+    if (cMaj > bestCorr) { bestCorr = cMaj; bestKey = NOTE_NAMES[root] + 'M' }
     if (cMin > bestCorr) { bestCorr = cMin; bestKey = NOTE_NAMES[root] + 'm' }
   }
   return bestKey

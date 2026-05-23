@@ -26,26 +26,37 @@ export function ThumbnailBuilder({ beatName, artists, onReady }: Props) {
   const [loading, setLoading]               = useState(false)
   const [previewUrl, setPreviewUrl]         = useState<string | null>(null)
   const [currentArtist, setCurrentArtist]   = useState<string>('')
-  const [quotaError, setQuotaError]         = useState(false)
 
-  // Fetch artist photos on mount
+  // Fetch photos for up to 3 artists in parallel (Deezer — no quota)
   useEffect(() => {
     if (!artists.length) return
-    const name = artists[0]
-    setCurrentArtist(name)
     setLoading(true)
-    setQuotaError(false)
+    setCurrentArtist(artists[0])
 
-    fetch(`/api/upload/artist-photo?name=${encodeURIComponent(name)}`)
-      .then(r => r.json())
-      .then(data => {
-        if (data.code === 'quotaExceeded') { setQuotaError(true); return }
-        const list: ArtistResult[] = data.results || []
-        setResults(list)
-        setIdx(0)
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false))
+    Promise.all(
+      artists.slice(0, 3).map(name =>
+        fetch(`/api/upload/artist-photo?name=${encodeURIComponent(name)}`)
+          .then(r => r.json())
+          .then(data => ({ name, items: (data.results || []) as ArtistResult[] }))
+          .catch(() => ({ name, items: [] as ArtistResult[] }))
+      )
+    ).then(responses => {
+      const seen = new Set<string>()
+      const combined: ArtistResult[] = []
+      for (const { name, items } of responses) {
+        let added = 0
+        for (const item of items) {
+          if (added >= 3 || seen.has(item.url)) continue
+          seen.add(item.url)
+          combined.push(item)
+          added++
+        }
+        if (combined.length > 0 && currentArtist === artists[0]) setCurrentArtist(name)
+      }
+      setResults(combined)
+      setIdx(0)
+      if (!combined.length) setCurrentArtist(artists[0])
+    }).finally(() => setLoading(false))
   }, [artists])
 
   // Redraw canvas whenever result index changes
@@ -222,10 +233,6 @@ export function ThumbnailBuilder({ beatName, artists, onReady }: Props) {
         {loading ? (
           <p style={{ color: '#333333', fontSize: '11px', letterSpacing: '2px' }}>
             BUSCANDO FOTO DO ARTISTA<span className="blink">_</span>
-          </p>
-        ) : quotaError ? (
-          <p style={{ color: '#555555', fontSize: '10px', letterSpacing: '1px' }}>
-            ⚠ QUOTA EXCEDIDA — thumbnail sem foto
           </p>
         ) : previewUrl ? (
           <img src={previewUrl} style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} alt="thumbnail" />
