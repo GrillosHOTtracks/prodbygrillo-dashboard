@@ -547,13 +547,17 @@ function CardTrending({ niches, markets, typeBeat }: {
 
 // ─── Card 2: LAIS ─────────────────────────────────────────────────────────────
 
-function CardLAIS({ data, loading, marketData, onSchedule }: {
-  data:        LaisData | null
-  loading?:    boolean
-  marketData?: MarketData
-  onSchedule?: (ctx: MarketContext) => void
+function CardLAIS({ data, loading, marketData, onSchedule, schedulerUsed, onSchedulerUsed, onSchedulerReset }: {
+  data:              LaisData | null
+  loading?:          boolean
+  marketData?:       MarketData
+  onSchedule?:       (ctx: MarketContext) => void
+  schedulerUsed?:    boolean
+  onSchedulerUsed?:  () => void
+  onSchedulerReset?: () => void
 }) {
   const [btnHover, setBtnHover] = useState(false)
+  const [resetHover, setResetHover] = useState(false)
 
   if (loading && !data) return (
     <div style={card}>
@@ -606,27 +610,47 @@ function CardLAIS({ data, loading, marketData, onSchedule }: {
           &nbsp;|&nbsp;Tom: <span style={{ color: 'var(--text-dim)' }}>{data.fazerAgora.tom}</span>
         </p>
         {onSchedule && (
-          <button
-            onClick={() => onSchedule({
-              artist:    data.oportunidade.artista,
-              niche:     data.oportunidade.nicho,
-              keywords:  marketData?.typeBeat.referenceArtists ?? [],
-              hotMarket: data.mercadoQuente,
-              bpm:       data.fazerAgora.bpm,
-              key:       data.fazerAgora.tom,
-              title:     data.fazerAgora.titulo,
-            })}
-            onMouseEnter={() => setBtnHover(true)}
-            onMouseLeave={() => setBtnHover(false)}
-            style={{
-              background: btnHover ? 'var(--accent-muted)' : 'transparent',
-              border: '1px solid var(--accent-border)',
-              color: 'var(--accent)',
-              fontSize: '10px', padding: '4px 10px',
-              cursor: 'pointer', fontFamily: 'Courier New, monospace',
-              letterSpacing: '1px', transition: 'background 0.12s',
-            }}
-          >[ CRIAR NO SCHEDULER ]</button>
+          schedulerUsed ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ color: '#00ff00', fontSize: '10px', letterSpacing: '1px' }}>✓ CRIADO HOJE</span>
+              <button
+                onClick={onSchedulerReset}
+                onMouseEnter={() => setResetHover(true)}
+                onMouseLeave={() => setResetHover(false)}
+                style={{
+                  background: 'transparent', border: 'none',
+                  color: resetHover ? 'var(--text-dim)' : 'var(--text-faint)',
+                  fontSize: '9px', cursor: 'pointer', fontFamily: 'Courier New, monospace',
+                  letterSpacing: '1px', textDecoration: 'underline', padding: 0,
+                }}
+              >[ criar outro ]</button>
+            </div>
+          ) : (
+            <button
+              onClick={() => {
+                onSchedule({
+                  artist:    data.oportunidade.artista,
+                  niche:     data.oportunidade.nicho,
+                  keywords:  marketData?.typeBeat.referenceArtists ?? [],
+                  hotMarket: data.mercadoQuente,
+                  bpm:       data.fazerAgora.bpm,
+                  key:       data.fazerAgora.tom,
+                  title:     data.fazerAgora.titulo,
+                })
+                onSchedulerUsed?.()
+              }}
+              onMouseEnter={() => setBtnHover(true)}
+              onMouseLeave={() => setBtnHover(false)}
+              style={{
+                background: btnHover ? 'var(--accent-muted)' : 'transparent',
+                border: '1px solid var(--accent-border)',
+                color: 'var(--accent)',
+                fontSize: '10px', padding: '4px 10px',
+                cursor: 'pointer', fontFamily: 'Courier New, monospace',
+                letterSpacing: '1px', transition: 'background 0.12s',
+              }}
+            >[ CRIAR NO SCHEDULER ]</button>
+          )
         )}
       </div>
 
@@ -807,6 +831,8 @@ export function Market({ onNavigate: _onNavigate, onUseInScheduler }: {
   onNavigate?:       (page: Page) => void
   onUseInScheduler?: (ctx: MarketContext) => void
 }) {
+  const todayKey = () => `market_done_${new Date().toISOString().slice(0, 10)}`
+
   const [data, setData]           = useState<MarketData | null>(null)
   const [loading, setLoading]     = useState(true)
   const [error, setError]         = useState('')
@@ -814,6 +840,7 @@ export function Market({ onNavigate: _onNavigate, onUseInScheduler }: {
   const [laisLoading, setLaisLoading]   = useState(false)
   const [commData, setCommData]         = useState<CommentInsights | null>(null)
   const [commLoading, setCommLoading]   = useState(false)
+  const [schedulerUsed, setSchedulerUsed] = useState(() => localStorage.getItem(todayKey()) === '1')
 
   const load = (bust = false) => {
     setLoading(true)
@@ -919,6 +946,15 @@ export function Market({ onNavigate: _onNavigate, onUseInScheduler }: {
               loading={laisLoading}
               marketData={data ?? undefined}
               onSchedule={onUseInScheduler}
+              schedulerUsed={schedulerUsed}
+              onSchedulerUsed={() => {
+                localStorage.setItem(todayKey(), '1')
+                setSchedulerUsed(true)
+              }}
+              onSchedulerReset={() => {
+                localStorage.removeItem(todayKey())
+                setSchedulerUsed(false)
+              }}
             />
             <CardChannels channels={data.channels ?? []} />
             <CardComments data={commData} loading={commLoading} />
