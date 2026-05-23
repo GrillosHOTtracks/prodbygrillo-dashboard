@@ -390,7 +390,7 @@ router.post('/analyze-beat', async (req, res) => {
 
 // POST /api/ai/chat — Groq llama-3.3-70b, SSE streaming
 router.post('/chat', async (req, res) => {
-  const { question, context, history, maxTokens } = req.body
+  const { question, context, history, maxTokens, systemPrompt } = req.body
   if (!question || typeof question !== 'string' || !question.trim()) {
     return res.status(400).json({ error: 'question is required' })
   }
@@ -411,7 +411,9 @@ router.post('/chat', async (req, res) => {
 
   try {
     const client = new Groq({ apiKey })
-    const prompt = buildChatPrompt(context, history, question.trim())
+    const prompt = (typeof systemPrompt === 'string' && systemPrompt.trim())
+      ? `${systemPrompt.trim()}\n\n${question.trim()}`
+      : buildChatPrompt(context, history, question.trim())
     const MODELS = ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant']
 
     let streamed = false

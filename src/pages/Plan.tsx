@@ -58,12 +58,25 @@ function fmtViews(n: number) {
   return n >= 1000000 ? `${(n / 1000000).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n)
 }
 
+// ─── System prompt for all Plan/LAIS calls ────────────────────────────────────
+const PLAN_SYSTEM_PROMPT = `Você é um estrategista de crescimento do YouTube especializado no nicho de produtores musicais, beatmakers e venda de beats (Type Beats). Seu objetivo é transformar o canal prodbygrillo em uma máquina de visualizações, inscritos e vendas de beats via BeatStars.
+
+Você domina o algoritmo do YouTube (vídeos longos e Shorts), SEO para música, funis de conversão de ouvintes para compradores, e psicologia do público (rappers, cantores e compositores que buscam beats).
+
+Ao gerar o checklist diário e insights, aplica sempre estes pilares:
+1. SEO de Type Beats: tags estratégicas, títulos magnéticos com artista em alta + estilo, descrições otimizadas com links de compra no topo
+2. Retenção e Engajamento: como prender o artista nos primeiros 5-10 segundos, drop forte
+3. Linha Editorial Diversificada: não só beat estático — bastidores, tutoriais, Shorts, conteúdo que humaniza o canal
+4. Funil de Vendas: estratégias para levar o lead do YouTube para o BeatStars ou lista de contatos
+
+Tom: profissional, direto, focado em resultados, inovador.`
+
 // ─── SSE helper — POST /api/ai/chat, collect full text ────────────────────────
-async function laisChat(question: string, maxTokens = 1024): Promise<string> {
+async function laisChat(question: string, maxTokens = 1024, systemPrompt?: string): Promise<string> {
   const res = await fetch('/api/ai/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ question, maxTokens }),
+    body: JSON.stringify({ question, maxTokens, ...(systemPrompt ? { systemPrompt } : {}) }),
   })
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
   const reader  = res.body!.getReader()
@@ -254,7 +267,7 @@ Responde APENAS em JSON válido (sem markdown, sem texto antes ou depois):
 REGRAS: máximo 7 itens · IDs únicos em kebab-case sem repetir os de ontem · page deve ser um dos valores válidos ou null · português de Portugal · se dias sem upload > 7, tarefa principal é OBRIGATORIAMENTE fazer upload`
 
     try {
-      const full   = await laisChat(question, 2048)
+      const full   = await laisChat(question, 2048, PLAN_SYSTEM_PROMPT)
       const parsed = extractJson(full) as PlanData
       if (parsed.mainTask?.page) parsed.mainTask.page = sanitizePage(parsed.mainTask.page)
       if (Array.isArray(parsed.checklist)) {
@@ -320,7 +333,7 @@ Rules for BOTH comments:
 Reply ONLY in valid JSON (no markdown, no text before or after):
 {"comments":[{"videoId":"ID","commentPt":"...","commentEn":"..."}]}`
 
-      const full   = await laisChat(question, 1500)
+      const full   = await laisChat(question, 1500, PLAN_SYSTEM_PROMPT)
       const parsed = extractJson(full) as { comments: { videoId: string; commentPt: string; commentEn: string }[] }
 
       const commentMap: Record<string, { pt: string; en: string }> = {}
