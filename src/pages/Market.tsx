@@ -608,8 +608,8 @@ export function Market({ onNavigate }: { onNavigate?: (page: Page) => void }) {
           </p>
           <p style={{ color: 'var(--text-faint)', fontSize: '10px', margin: 0, letterSpacing: '0.5px' }}>
             {data
-              ? `${totalVideos} vídeos analisados · 6 nichos · 8 mercados · cache 24h`
-              : '6 nichos × 8 mercados · US UK BR FR NG CA JP CN · cache 24h'}
+              ? `${totalVideos.toLocaleString('pt')} vídeos analisados · 27 nichos · 23 mercados · cache 24h`
+              : '27 nichos × 23 mercados · Americas · Europa · África · Ásia · Oceania · cache 24h'}
             {updatedLabel && <span style={{ marginLeft: 12, opacity: 0.6 }}>actualizado {updatedLabel}</span>}
           </p>
         </div>
