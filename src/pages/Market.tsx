@@ -91,7 +91,7 @@ function Divider() {
   return <div style={{ height: 1, backgroundColor: 'var(--border)', opacity: 0.5 }} />
 }
 
-function TabBtn({ id, active, onClick, children }: { id: string; active: boolean; onClick: () => void; children: React.ReactNode }) {
+function TabBtn({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
     <button
       onClick={onClick}
@@ -141,9 +141,9 @@ function CardTrending({ niches, markets, typeBeat, hottestNiche, hottestMarket }
 
       {/* Tabs */}
       <div style={{ display: 'flex', gap: 0, borderBottom: '1px solid var(--border)' }}>
-        <TabBtn id="niches"   active={tab === 'niches'}   onClick={() => setTab('niches')}>  [ NICHOS ]   </TabBtn>
-        <TabBtn id="markets"  active={tab === 'markets'}  onClick={() => setTab('markets')}>  [ MERCADOS ] </TabBtn>
-        <TabBtn id="typebeat" active={tab === 'typebeat'} onClick={() => setTab('typebeat')}> [ TYPE BEATS ]</TabBtn>
+        <TabBtn active={tab === 'niches'}   onClick={() => setTab('niches')}>  [ NICHOS ]   </TabBtn>
+        <TabBtn active={tab === 'markets'}  onClick={() => setTab('markets')}>  [ MERCADOS ] </TabBtn>
+        <TabBtn active={tab === 'typebeat'} onClick={() => setTab('typebeat')}> [ TYPE BEATS ]</TabBtn>
       </div>
 
       {/* NICHOS */}
@@ -276,8 +276,8 @@ function CardCatalog({ data }: { data: BeatStarsData | null }) {
       </div>
 
       <div style={{ display: 'flex', gap: 0, borderBottom: '1px solid var(--border)' }}>
-        <TabBtn id="plays" active={tab === 'plays'} onClick={() => setTab('plays')}>[ MAIS VISTOS ]</TabBtn>
-        <TabBtn id="sales" active={tab === 'sales'} onClick={() => setTab('sales')}>[ VENDAS ]</TabBtn>
+        <TabBtn active={tab === 'plays'} onClick={() => setTab('plays')}>[ MAIS VISTOS ]</TabBtn>
+        <TabBtn active={tab === 'sales'} onClick={() => setTab('sales')}>[ VENDAS ]</TabBtn>
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
