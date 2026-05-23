@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import type { Page } from '../types'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -469,7 +470,7 @@ function CardLAIS({ data, onSchedule }: { data: LaisData | null; onSchedule?: (t
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 
-export function Market({ onNavigate }: { onNavigate?: (page: string) => void }) {
+export function Market({ onNavigate }: { onNavigate?: (page: Page) => void }) {
   const [data, setData]       = useState<MarketData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError]     = useState('')
@@ -546,7 +547,7 @@ export function Market({ onNavigate }: { onNavigate?: (page: string) => void }) 
           />
           <CardLAIS
             data={data.lais}
-            onSchedule={onNavigate ? (title) => { onNavigate('scheduler') } : undefined}
+            onSchedule={onNavigate ? (_title) => { onNavigate('scheduler') } : undefined}
           />
         </div>
       ) : null}
