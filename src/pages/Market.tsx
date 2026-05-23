@@ -2,12 +2,28 @@ import { useEffect, useState } from 'react'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-interface YTData {
+interface HotMarket { gl: string; flag: string; label: string; count: number }
+
+interface NicheResult {
+  id:         string
+  label:      string
   total:      number
-  topVibes:   string[]
+  hotMarket:  HotMarket
   topArtists: string[]
-  topGenres:  string[]
-  sample:     { title: string; channel: string }[]
+}
+
+interface MarketResult {
+  gl:         string
+  label:      string
+  flag:       string
+  total:      number
+  topNiche:   string
+  topArtists: string[]
+}
+
+interface TypeBeatResult {
+  total:            number
+  referenceArtists: string[]
 }
 
 interface BeatStarsTrack { title: string; plays: number; likes: number; sales: number }
@@ -28,11 +44,14 @@ interface LaisData {
 }
 
 interface MarketData {
-  updatedAt: string
-  ytBR:      YTData
-  ytUS:      YTData
-  beatstars: BeatStarsData | null
-  lais:      LaisData | null
+  updatedAt:    string
+  niches:       NicheResult[]
+  markets:      MarketResult[]
+  typeBeat:     TypeBeatResult
+  hottestNiche: string
+  hottestMarket: { gl: string; flag: string; label: string }
+  beatstars:    BeatStarsData | null
+  lais:         LaisData | null
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
@@ -47,7 +66,7 @@ const card: React.CSSProperties = {
   minHeight: 420,
 }
 
-const label: React.CSSProperties = {
+const lbl: React.CSSProperties = {
   color: 'var(--text-faint)',
   fontSize: '9px',
   letterSpacing: '1.5px',
@@ -68,101 +87,165 @@ function fmtNum(n: number) {
   return String(n)
 }
 
-function Vibe({ text }: { text: string }) {
-  return (
-    <span style={{ fontSize: '9px', padding: '2px 7px', border: '1px solid var(--border)', color: 'var(--text-dim)', letterSpacing: '0.5px' }}>
-      {text}
-    </span>
-  )
-}
-
 function Divider() {
   return <div style={{ height: 1, backgroundColor: 'var(--border)', opacity: 0.5 }} />
 }
 
-// ─── Card 1: YouTube Trending ─────────────────────────────────────────────────
-
-function CardYouTube({ ytBR, ytUS }: { ytBR: YTData; ytUS: YTData }) {
-  const [geo, setGeo] = useState<'BR' | 'US'>('BR')
-  const data = geo === 'BR' ? ytBR : ytUS
-
-  const tabBtn = (id: typeof geo, label: string) => (
+function TabBtn({ id, active, onClick, children }: { id: string; active: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
     <button
-      onClick={() => setGeo(id)}
+      onClick={onClick}
       style={{
         background: 'transparent', border: 'none', cursor: 'pointer',
         fontSize: '10px', letterSpacing: '1px', padding: '3px 10px',
         fontFamily: 'Courier New, monospace',
-        color: geo === id ? 'var(--accent)' : 'var(--text-faint)',
-        borderBottom: geo === id ? '1px solid var(--accent)' : '1px solid transparent',
+        color: active ? 'var(--accent)' : 'var(--text-faint)',
+        borderBottom: active ? '1px solid var(--accent)' : '1px solid transparent',
       }}
-    >{label}</button>
+    >{children}</button>
   )
+}
+
+// ─── Card 1: Tendências Globais ───────────────────────────────────────────────
+
+type TrendingTab = 'niches' | 'markets' | 'typebeat'
+
+function CardTrending({ niches, markets, typeBeat, hottestNiche, hottestMarket }: {
+  niches:        NicheResult[]
+  markets:       MarketResult[]
+  typeBeat:      TypeBeatResult
+  hottestNiche:  string
+  hottestMarket: { gl: string; flag: string; label: string }
+}) {
+  const [tab, setTab] = useState<TrendingTab>('niches')
+
+  const maxTotal = niches[0]?.total || 1
+  const hotNicheLabel = niches.find(n => n.id === hottestNiche)?.label || hottestNiche
+
+  const noData = niches.every(n => n.total === 0)
 
   return (
     <div style={card}>
+      {/* Header */}
       <div>
-        <p style={heading}>┌─ YOUTUBE TRENDING ──────────────</p>
-        <p style={{ ...label, margin: 0 }}>{data.total} músicas analisadas agora</p>
+        <p style={heading}>┌─ TENDÊNCIAS GLOBAIS ────────────</p>
+        {noData ? (
+          <p style={{ ...lbl, color: 'var(--text-faint)' }}>pesquisa em andamento — aguarda cache</p>
+        ) : (
+          <p style={{ ...lbl, margin: 0 }}>
+            nicho quente: <span style={{ color: 'var(--accent)' }}>{hotNicheLabel}</span>
+            &nbsp;·&nbsp;mercado: <span style={{ color: 'var(--accent)' }}>{hottestMarket.flag} {hottestMarket.label}</span>
+          </p>
+        )}
       </div>
 
+      {/* Tabs */}
       <div style={{ display: 'flex', gap: 0, borderBottom: '1px solid var(--border)' }}>
-        {tabBtn('BR', '[ BRASIL ]')}
-        {tabBtn('US', '[ US ]')}
+        <TabBtn id="niches"   active={tab === 'niches'}   onClick={() => setTab('niches')}>  [ NICHOS ]   </TabBtn>
+        <TabBtn id="markets"  active={tab === 'markets'}  onClick={() => setTab('markets')}>  [ MERCADOS ] </TabBtn>
+        <TabBtn id="typebeat" active={tab === 'typebeat'} onClick={() => setTab('typebeat')}> [ TYPE BEATS ]</TabBtn>
       </div>
 
-      <div>
-        <p style={label}>vibes dominantes</p>
-        <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginTop: 6 }}>
-          {data.topVibes.length ? data.topVibes.map(v => <Vibe key={v} text={v} />) : <span style={{ color: 'var(--text-faint)', fontSize: '10px' }}>—</span>}
-        </div>
-      </div>
-
-      {data.topGenres.length > 0 && (
-        <div>
-          <p style={label}>géneros locais</p>
-          <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginTop: 6 }}>
-            {data.topGenres.map(g => <Vibe key={g} text={g} />)}
-          </div>
+      {/* NICHOS */}
+      {tab === 'niches' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {niches.length === 0 && (
+            <p style={{ color: 'var(--text-faint)', fontSize: '10px' }}>sem dados</p>
+          )}
+          {niches.map((n, i) => {
+            const barPct = Math.round((n.total / maxTotal) * 100)
+            const color  = i === 0 ? 'var(--accent)' : i < 3 ? '#aaff00' : 'var(--text-dim)'
+            return (
+              <div key={n.id}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
+                  <span style={{ color: 'var(--text-faint)', fontSize: '9px', width: 14, flexShrink: 0, textAlign: 'right' }}>
+                    {String(i + 1).padStart(2, '0')}
+                  </span>
+                  <span style={{ color, fontSize: '11px', flex: 1, fontWeight: i === 0 ? 'bold' : 'normal' }}>
+                    {n.label}
+                  </span>
+                  <span style={{ color: 'var(--text-faint)', fontSize: '9px', flexShrink: 0 }}>
+                    {n.hotMarket.flag}&nbsp;{n.hotMarket.label}
+                  </span>
+                  <span style={{ color, fontSize: '9px', fontWeight: 'bold', flexShrink: 0, minWidth: 28, textAlign: 'right' }}>
+                    {n.total}
+                  </span>
+                </div>
+                <div style={{ height: 2, backgroundColor: 'var(--border)', marginLeft: 20 }}>
+                  <div style={{ height: '100%', width: `${barPct}%`, backgroundColor: color, transition: 'width 0.4s' }} />
+                </div>
+              </div>
+            )
+          })}
         </div>
       )}
 
-      <Divider />
-
-      <div>
-        <p style={{ ...label, marginBottom: 8 }}>top artistas</p>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          {data.topArtists.slice(0, 8).map((a, i) => (
-            <div key={a} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ color: i < 3 ? 'var(--accent)' : 'var(--text-faint)', fontSize: '9px', width: 16, textAlign: 'right', flexShrink: 0 }}>
-                {String(i + 1).padStart(2, '0')}
-              </span>
-              <span style={{ color: 'var(--text-dim)', fontSize: '11px' }}>{a}</span>
-            </div>
-          ))}
+      {/* MERCADOS */}
+      {tab === 'markets' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {markets.length === 0 && (
+            <p style={{ color: 'var(--text-faint)', fontSize: '10px' }}>sem dados</p>
+          )}
+          {markets.map((m, i) => {
+            const maxMkt = markets[0]?.total || 1
+            const barPct = Math.round((m.total / maxMkt) * 100)
+            const color  = i === 0 ? 'var(--accent)' : i < 3 ? '#aaff00' : 'var(--text-dim)'
+            return (
+              <div key={m.gl}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+                  <span style={{ fontSize: '12px', flexShrink: 0 }}>{m.flag}</span>
+                  <span style={{ color, fontSize: '10px', flex: 1 }}>{m.label}</span>
+                  <span style={{ color: 'var(--text-faint)', fontSize: '9px', flexShrink: 0, marginRight: 6 }}>
+                    {m.topNiche}
+                  </span>
+                  <span style={{ color, fontSize: '9px', fontWeight: 'bold', flexShrink: 0, minWidth: 28, textAlign: 'right' }}>
+                    {m.total}
+                  </span>
+                </div>
+                <div style={{ height: 1, backgroundColor: 'var(--border)', marginLeft: 22 }}>
+                  <div style={{ height: '100%', width: `${barPct}%`, backgroundColor: color, opacity: 0.6, transition: 'width 0.4s' }} />
+                </div>
+              </div>
+            )
+          })}
         </div>
-      </div>
+      )}
 
-      {data.sample.length > 0 && (
-        <>
-          <Divider />
-          <div>
-            <p style={{ ...label, marginBottom: 6 }}>sample de títulos</p>
-            {data.sample.slice(0, 4).map((s, i) => (
-              <p key={i} style={{ color: 'var(--text-faint)', fontSize: '9px', margin: '3px 0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                · {s.title}
+      {/* TYPE BEATS */}
+      {tab === 'typebeat' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <p style={{ ...lbl, marginBottom: 4 }}>artistas mais buscados como referência</p>
+          {typeBeat.referenceArtists.length === 0 ? (
+            <p style={{ color: 'var(--text-faint)', fontSize: '10px' }}>sem dados de type beats</p>
+          ) : (
+            typeBeat.referenceArtists.map((artist, i) => (
+              <div key={artist} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ color: i < 3 ? 'var(--accent)' : 'var(--text-faint)', fontSize: '9px', width: 16, textAlign: 'right', flexShrink: 0 }}>
+                  {String(i + 1).padStart(2, '0')}
+                </span>
+                <span style={{ color: i < 3 ? 'var(--text-bright)' : 'var(--text-dim)', fontSize: '11px' }}>
+                  {artist}
+                </span>
+              </div>
+            ))
+          )}
+          {typeBeat.total > 0 && (
+            <>
+              <Divider />
+              <p style={{ ...lbl }}>
+                {typeBeat.total} ocorrências analisadas · US · UK · Canada
               </p>
-            ))}
-          </div>
-        </>
+            </>
+          )}
+        </div>
       )}
     </div>
   )
 }
 
-// ─── Card 2: BeatStars ────────────────────────────────────────────────────────
+// ─── Card 2: Catálogo prodbygrillo ────────────────────────────────────────────
 
-function CardBeatStars({ data }: { data: BeatStarsData | null }) {
+function CardCatalog({ data }: { data: BeatStarsData | null }) {
   if (!data) return (
     <div style={card}>
       <p style={heading}>┌─ CATÁLOGO · PRODBYGRILLO ───────</p>
@@ -177,26 +260,10 @@ function CardBeatStars({ data }: { data: BeatStarsData | null }) {
     </div>
   )
 
-  const [tab, setTab] = useState<'plays' | 'likes' | 'sales'>('plays')
-  const tracks = tab === 'plays' ? data.topPlayed : tab === 'likes' ? data.topLiked : data.topSold || []
-  const statKey = tab === 'plays' ? 'plays' : tab === 'likes' ? 'likes' : 'sales'
+  const [tab, setTab] = useState<'plays' | 'sales'>('plays')
+  const tracks  = tab === 'plays' ? data.topPlayed : data.topSold || []
+  const statKey = tab === 'plays' ? 'plays' : 'sales'
   const maxVal  = Math.max(...tracks.map(t => t[statKey] || 0), 1)
-
-  const tabBtn = (id: typeof tab, lbl: string, disabled?: boolean) => (
-    <button
-      onClick={() => !disabled && setTab(id)}
-      disabled={disabled}
-      style={{
-        background: 'transparent', border: 'none',
-        cursor: disabled ? 'not-allowed' : 'pointer',
-        fontSize: '10px', letterSpacing: '1px', padding: '3px 10px',
-        fontFamily: 'Courier New, monospace',
-        color: disabled ? 'var(--text-faint)' : tab === id ? 'var(--accent)' : 'var(--text-faint)',
-        borderBottom: tab === id && !disabled ? '1px solid var(--accent)' : '1px solid transparent',
-        opacity: disabled ? 0.4 : 1,
-      }}
-    >{lbl}</button>
-  )
 
   return (
     <div style={card}>
@@ -209,13 +276,14 @@ function CardBeatStars({ data }: { data: BeatStarsData | null }) {
       </div>
 
       <div style={{ display: 'flex', gap: 0, borderBottom: '1px solid var(--border)' }}>
-        {tabBtn('plays', '[ MAIS VISTOS ]')}
-        {tabBtn('likes', '[ MAIS RECENTES ]', true)}
-        {tabBtn('sales', '[ MAIS VENDIDOS ]', !data.topSold?.length)}
+        <TabBtn id="plays" active={tab === 'plays'} onClick={() => setTab('plays')}>[ MAIS VISTOS ]</TabBtn>
+        <TabBtn id="sales" active={tab === 'sales'} onClick={() => setTab('sales')}>[ VENDAS ]</TabBtn>
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {tracks.map((t, i) => {
+        {tracks.length === 0 ? (
+          <p style={{ color: 'var(--text-faint)', fontSize: '10px' }}>sem dados</p>
+        ) : tracks.map((t, i) => {
           const val   = t[statKey] || 0
           const pct   = Math.round((val / maxVal) * 100)
           const color = i === 0 ? 'var(--accent)' : i < 3 ? '#aaff00' : 'var(--text-dim)'
@@ -240,17 +308,9 @@ function CardBeatStars({ data }: { data: BeatStarsData | null }) {
   )
 }
 
-// ─── Card 3: LAIS Recommendation ─────────────────────────────────────────────
+// ─── Card 3: LAIS ─────────────────────────────────────────────────────────────
 
-function CardLAIS({ data, loading }: { data: LaisData | null; loading: boolean }) {
-  if (loading) return (
-    <div style={{ ...card, alignItems: 'center', justifyContent: 'center' }}>
-      <p style={{ color: 'var(--text-faint)', fontSize: '11px', letterSpacing: '2px' }}>
-        LAIS A ANALISAR<span className="blink">_</span>
-      </p>
-    </div>
-  )
-
+function CardLAIS({ data }: { data: LaisData | null }) {
   if (!data) return (
     <div style={card}>
       <p style={heading}>┌─ LAIS · INTELIGÊNCIA DE MERCADO ─</p>
@@ -271,10 +331,9 @@ function CardLAIS({ data, loading }: { data: LaisData | null; loading: boolean }
   return (
     <div style={card}>
       <p style={heading}>┌─ LAIS · INTELIGÊNCIA DE MERCADO ─</p>
-
       {sections.map((s, i) => (
         <div key={i} style={{ padding: '12px', backgroundColor: i === 2 ? 'var(--accent-muted)' : '#0a0a0a', border: `1px solid ${i === 2 ? 'var(--accent-border)' : 'var(--border)'}` }}>
-          <p style={{ ...label, marginBottom: 6, color: i === 2 ? 'var(--accent)' : 'var(--text-faint)' }}>
+          <p style={{ ...lbl, marginBottom: 6, color: i === 2 ? 'var(--accent)' : 'var(--text-faint)' }}>
             {s.key}
           </p>
           <p style={{ color: i === 2 ? 'var(--text-bright)' : 'var(--text-dim)', fontSize: '11px', lineHeight: 1.7, margin: 0 }}>
@@ -308,18 +367,21 @@ export function Market() {
     ? new Date(data.updatedAt).toLocaleString('pt', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
     : null
 
+  const totalVideos = data?.niches.reduce((s, n) => s + n.total, 0) ?? 0
+
   return (
     <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
 
-      {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
         <div>
           <p style={{ color: 'var(--accent)', fontSize: '11px', letterSpacing: '2px', margin: '0 0 4px', opacity: 0.8 }}>
             ┌─ MERCADO · INTELIGÊNCIA DE VENDAS ─────────────────────
           </p>
           <p style={{ color: 'var(--text-faint)', fontSize: '10px', margin: 0, letterSpacing: '0.5px' }}>
-            YouTube Trending (BR + US) · BeatStars · LAIS · cache 24h
-            {updatedLabel && <span style={{ marginLeft: 12, color: 'var(--text-faint)', opacity: 0.6 }}>actualizado {updatedLabel}</span>}
+            {data
+              ? `${totalVideos} vídeos analisados · 6 nichos · 8 mercados · cache 24h`
+              : '6 nichos × 8 mercados · US UK BR FR NG CA JP CN · cache 24h'}
+            {updatedLabel && <span style={{ marginLeft: 12, opacity: 0.6 }}>actualizado {updatedLabel}</span>}
           </p>
         </div>
         <button
@@ -355,9 +417,15 @@ export function Market() {
         </div>
       ) : data ? (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
-          <CardYouTube ytBR={data.ytBR} ytUS={data.ytUS} />
-          <CardBeatStars data={data.beatstars} />
-          <CardLAIS data={data.lais} loading={false} />
+          <CardTrending
+            niches={data.niches}
+            markets={data.markets}
+            typeBeat={data.typeBeat}
+            hottestNiche={data.hottestNiche}
+            hottestMarket={data.hottestMarket}
+          />
+          <CardCatalog data={data.beatstars} />
+          <CardLAIS data={data.lais} />
         </div>
       ) : null}
 
