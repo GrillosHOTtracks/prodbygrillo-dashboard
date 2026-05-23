@@ -67,11 +67,11 @@ app.use('/api/analytics', requireAuth, analyticsRoutes)
 app.use('/api/videos',    requireAuth, videosRoutes)
 app.use('/api/audience',  requireAuth, audienceRoutes)
 app.use('/api/trending',  requireAuth, trendingRoutes)
-app.use('/api/ai',        requireAuth, aiRoutes)
+app.use('/api/ai',        aiRoutes)
 app.use('/api/upload',    requireAuth, uploadRoutes)
 app.use('/api/instagram',  instagramRoutes)
 app.use('/api/beatstars', beatstarsRoutes)
-app.use('/api/market',   requireAuth, marketRoutes)
+app.use('/api/market',   marketRoutes)
 
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true, authenticated: accountManager.isAuthenticated(), ts: new Date().toISOString() })
