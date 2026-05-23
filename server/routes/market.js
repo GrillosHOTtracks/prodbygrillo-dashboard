@@ -87,6 +87,15 @@ function isJunk({ title = '', channel = '' }) {
 
 // ─── Innertube search ─────────────────────────────────────────────────────────
 
+function parseViews(text) {
+  if (!text) return 0
+  const s = text.replace(/,/g, '').replace(/\s*views?/i, '').trim()
+  const m = s.match(/^([\d.]+)\s*([KMBkmb]?)$/)
+  if (!m) return 0
+  const mult = { k: 1e3, m: 1e6, b: 1e9 }[m[2].toLowerCase()] ?? 1
+  return Math.round(parseFloat(m[1]) * mult)
+}
+
 const YT_HEADERS = {
   'Content-Type': 'application/json',
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
@@ -116,7 +125,8 @@ async function searchYT(query, gl, hl = 'en') {
         if (!v?.videoId) continue
         const title   = v.title?.runs?.map(r => r.text).join('') || ''
         const channel = v.ownerText?.runs?.[0]?.text || v.longBylineText?.runs?.[0]?.text || ''
-        const obj = { title, channel }
+        const vcRaw   = v.viewCountText?.simpleText ?? v.viewCountText?.runs?.[0]?.text ?? ''
+        const obj = { title, channel, views: parseViews(vcRaw) }
         if (!isJunk(obj)) items.push(obj)
       }
     }
@@ -184,7 +194,7 @@ function buildTasks() {
 
 function aggregateResults(results) {
   const nicheAcc = Object.fromEntries(
-    NICHES.map(n => [n.id, { id: n.id, label: n.label, total: 0, byMarket: {}, artists: new Set() }])
+    NICHES.map(n => [n.id, { id: n.id, label: n.label, total: 0, byMarket: {}, artists: new Set(), sampleRaw: [] }])
   )
   const marketAcc = Object.fromEntries(
     MARKETS.map(m => [m.gl, { gl: m.gl, label: m.label, flag: m.flag, total: 0, byNiche: {}, artists: new Set() }])
@@ -198,8 +208,10 @@ function aggregateResults(results) {
       if (!nacc || !macc) continue
       nacc.total += items.length
       nacc.byMarket[gl] = (nacc.byMarket[gl] || 0) + items.length
-      for (const { channel } of items) {
+      const mkt = MARKET_MAP[gl] || MARKETS[0]
+      for (const { title, channel, views } of items) {
         if (channel) nacc.artists.add(channel)
+        nacc.sampleRaw.push({ title, channel, views, flag: mkt.flag, market: mkt.label })
         macc.total++
         macc.byNiche[nicheId] = (macc.byNiche[nicheId] || 0) + 1
         if (channel) macc.artists.add(channel)
@@ -218,11 +230,18 @@ function aggregateResults(results) {
     const acc  = nicheAcc[n.id]
     const hotEntry = Object.entries(acc.byMarket).sort((a, b) => b[1] - a[1])[0]
     const hotInfo  = MARKET_MAP[hotEntry?.[0]] || MARKETS[0]
+    // Dedupe sample by title, sort by views desc, cap at 30
+    const seen = new Set()
+    const sample = acc.sampleRaw
+      .filter(v => { if (seen.has(v.title)) return false; seen.add(v.title); return true })
+      .sort((a, b) => b.views - a.views)
+      .slice(0, 30)
     return {
       id: n.id, label: n.label,
       total: acc.total,
       hotMarket: { gl: hotEntry?.[0] || 'US', flag: hotInfo.flag, label: hotInfo.label, count: hotEntry?.[1] || 0 },
       topArtists: [...acc.artists].slice(0, 8),
+      sample,
     }
   }).sort((a, b) => b.total - a.total)
 
@@ -286,15 +305,15 @@ function buildCatalog() {
 
 // ─── LAIS — só responde com dados reais ──────────────────────────────────────
 
-async function analyzeWithLAIS(trending, catalog) {
+async function analyzeWithLAIS(trending) {
   const apiKey = process.env.GROQ_API_KEY
   if (!apiKey) return null
 
   const hasData = trending.niches.some(n => n.total > 0)
   if (!hasData) return {
     pulseMercado: 'Aguardando dados de mercado. Nenhum vídeo encontrado nas pesquisas.',
-    melhorMatch:  '—',
     proximoBeat:  '—',
+    tendencia:    '—',
   }
 
   const topNiches = trending.niches.slice(0, 4)
@@ -302,36 +321,25 @@ async function analyzeWithLAIS(trending, catalog) {
     .join(' | ')
 
   const topMarkets = trending.markets.slice(0, 4)
-    .map(m => `${m.flag} ${m.label} (${m.total} vídeos, nicho dominante: ${m.topNiche})`)
+    .map(m => `${m.flag} ${m.label} (${m.total} vídeos, top: ${m.topNiche})`)
     .join(' | ')
 
   const typeBeatLine = trending.typeBeat.referenceArtists.length
-    ? `Type beats mais buscados: ${trending.typeBeat.referenceArtists.slice(0, 6).join(', ')}`
+    ? `Type beats mais buscados: ${trending.typeBeat.referenceArtists.slice(0, 8).join(', ')}`
     : ''
 
-  const catLine = catalog
-    ? [
-        `${catalog.totalTracks} uploads | ${catalog.totalPlays.toLocaleString()} views totais`,
-        catalog.recent?.length ? `Mais recentes: ${catalog.recent.slice(0, 3).map(t => `"${t}"`).join(' · ')}` : '',
-        catalog.topPlayed?.[0]?.plays ? `Mais vistos: ${catalog.topPlayed.slice(0, 3).map(t => `"${t.title}" ${t.plays}v`).join(' · ')}` : '',
-      ].filter(Boolean).join(' | ')
-    : 'Nenhum upload no historial ainda.'
-
-  const prompt = `És LAIS, analista de mercado do produtor prodbygrillo (beats). Usa APENAS os dados abaixo — nunca inventes artistas, géneros ou tendências que não estejam aqui.
+  const prompt = `És LAIS, analista de mercado para produtores de beats. Usa APENAS os dados abaixo — nunca inventes artistas, géneros ou tendências.
 
 MERCADO GLOBAL (YouTube, ${new Date().toLocaleDateString('pt-BR')}):
 Nichos: ${topNiches}
 Mercados: ${topMarkets}
 ${typeBeatLine}
 
-CATÁLOGO (uploads do Scheduler):
-${catLine}
-
 Responde APENAS com JSON válido, sem texto extra:
 {
-  "pulseMercado": "2 frases sobre o que o mercado pede com base nos nichos/mercados acima — cita dados reais",
-  "melhorMatch": "2 frases sobre qual beat do catálogo se alinha melhor com o trending — usa nomes reais dos uploads, ou diz que o catálogo está vazio",
-  "proximoBeat": "3 frases: artista real dos type beats + nicho dominante + 3 elementos de produção específicos"
+  "pulseMercado": "2 frases sobre o que o mercado pede com base nos nichos/mercados — cita dados reais",
+  "proximoBeat": "3 frases: artista real dos type beats + nicho dominante + 3 elementos de produção específicos",
+  "tendencia": "1 frase sobre o mercado que está a crescer mais e porquê"
 }`
 
   try {
@@ -366,16 +374,9 @@ router.get('/', async (req, res) => {
     )
 
     const trending = aggregateResults(rawResults)
-    const catalog  = buildCatalog()
+    const lais = await analyzeWithLAIS(trending, null)
 
-    const beatstars = catalog
-      ? { topPlayed: catalog.topPlayed, topLiked: catalog.topLiked, topSold: catalog.topSold,
-          totalTracks: catalog.totalTracks, totalPlays: catalog.totalPlays, totalLikes: 0 }
-      : null
-
-    const lais = await analyzeWithLAIS(trending, catalog)
-
-    const result = { updatedAt: new Date().toISOString(), ...trending, beatstars, lais }
+    const result = { updatedAt: new Date().toISOString(), ...trending, lais }
     _cache = result; _cacheTs = Date.now()
     saveDisk(result)
     res.json(result)
