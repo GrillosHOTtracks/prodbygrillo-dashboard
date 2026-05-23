@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { ThumbnailBuilder } from '../components/scheduler/ThumbnailBuilder'
 import { analyzeAudio } from '../lib/audioAnalysis'
-import type { Page } from '../types'
+import type { Page, MarketContext } from '../types'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface BeatAnalysis {
@@ -193,14 +193,23 @@ function UploadHistory({ refreshKey }: { refreshKey: number }) {
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
-export function Scheduler({ onNavigate, presetArtist, onPresetConsumed }: { onNavigate?: (page: Page) => void, presetArtist?: string, onPresetConsumed?: () => void }) {
+export function Scheduler({ onNavigate, presetArtist, onPresetConsumed, marketContext, onMarketContextConsumed }: {
+  onNavigate?: (page: Page) => void
+  presetArtist?: string
+  onPresetConsumed?: () => void
+  marketContext?: MarketContext
+  onMarketContextConsumed?: () => void
+}) {
   const [step, setStep] = useState<1|2|3|4>(1)
 
   // ── Etapa 1: files
   const [videoFile, setVideoFile]     = useState<File | null>(null)
   const [thumbFile, setThumbFile]     = useState<File | null>(null)
   const [thumbPreview, setThumbPreview] = useState<string | null>(null)
-  const [beatName, setBeatName]       = useState(presetArtist ? `${presetArtist} Type Beat` : '')
+  const [beatName, setBeatName]       = useState(
+    marketContext?.title ?? (marketContext?.artist ? `${marketContext.artist} Type Beat` : '') ||
+    (presetArtist ? `${presetArtist} Type Beat` : '')
+  )
   const videoInputRef                 = useRef<HTMLInputElement>(null)
   const thumbInputRef                 = useRef<HTMLInputElement>(null)
 
@@ -240,11 +249,17 @@ export function Scheduler({ onNavigate, presetArtist, onPresetConsumed }: { onNa
   const [detectedBpm, setDetectedBpm]   = useState<number | null>(null)
   const [detectedKey, setDetectedKey]   = useState<string | null>(null)
 
+  // ── Market context ref (stable across re-renders)
+  const marketCtxRef = useRef<MarketContext | undefined>(marketContext)
+
   // ── History
   const [histRefreshKey, setHistRefreshKey] = useState(0)
 
-  // ── Clear preset from App after reading it on mount
-  useEffect(() => { if (presetArtist) onPresetConsumed?.() }, [])
+  // ── Clear presets from App after reading on mount
+  useEffect(() => {
+    if (presetArtist)  onPresetConsumed?.()
+    if (marketContext) onMarketContextConsumed?.()
+  }, []) // eslint-disable-line
 
   // ── Published links (etapa 4)
   const [publishedYt, setPublishedYt] = useState<string | null>(null)
@@ -326,7 +341,7 @@ export function Scheduler({ onNavigate, presetArtist, onPresetConsumed }: { onNa
       const res = await fetch('/api/ai/analyze-beat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ beatName: name, bpm, key }),
+        body: JSON.stringify({ beatName: name, bpm, key, marketContext: marketCtxRef.current ?? null }),
       })
       if (!res.ok) {
         const body = await res.json().catch(() => ({}))
@@ -550,6 +565,32 @@ export function Scheduler({ onNavigate, presetArtist, onPresetConsumed }: { onNa
 
       <StepIndicator step={step} />
 
+      {/* ── Market context badge ── */}
+      {marketCtxRef.current && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap',
+          padding: '10px 14px',
+          backgroundColor: '#050f05',
+          border: '1px solid #1a4a1a',
+          borderLeft: '3px solid #00ff00',
+        }}>
+          <span style={{ color: '#00ff00', fontSize: '10px', letterSpacing: '1.5px', flexShrink: 0 }}>📡 BASEADO NO MERCADO</span>
+          <span style={{ color: '#555555', fontSize: '10px' }}>·</span>
+          <span style={{ color: '#00cc00', fontSize: '10px', fontWeight: 'bold' }}>{marketCtxRef.current.artist}</span>
+          <span style={{ color: '#555555', fontSize: '10px' }}>·</span>
+          <span style={{ color: '#777777', fontSize: '10px' }}>{marketCtxRef.current.niche}</span>
+          <span style={{ color: '#555555', fontSize: '10px' }}>·</span>
+          <span style={{ color: '#777777', fontSize: '10px' }}>{marketCtxRef.current.hotMarket.replace(/\{[\s\S]*\}/, '').slice(0, 40)}</span>
+          {(marketCtxRef.current.bpm || marketCtxRef.current.key) && (
+            <>
+              <span style={{ color: '#555555', fontSize: '10px' }}>·</span>
+              {marketCtxRef.current.bpm && <span style={{ color: '#444444', fontSize: '10px', border: '1px solid #1a3a1a', padding: '1px 5px' }}>{marketCtxRef.current.bpm} BPM</span>}
+              {marketCtxRef.current.key && <span style={{ color: '#444444', fontSize: '10px', border: '1px solid #1a3a1a', padding: '1px 5px' }}>{marketCtxRef.current.key}</span>}
+            </>
+          )}
+        </div>
+      )}
+
       {/* ══════════════════════════════════════════════════════════
           ETAPA 1 — UPLOAD
       ══════════════════════════════════════════════════════════ */}
@@ -559,6 +600,33 @@ export function Scheduler({ onNavigate, presetArtist, onPresetConsumed }: { onNa
         </p>
 
         <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '12px' }}>
+
+          {/* Market context quick-analyze (no video needed) */}
+          {marketCtxRef.current && !videoFile && aiStatus === 'idle' && (
+            <div style={{ gridColumn: '1 / -1', padding: '12px', backgroundColor: '#050f05', border: '1px solid #1a4a1a', marginBottom: '4px' }}>
+              <p style={{ ...dim, marginBottom: '8px' }}>NOME DO BEAT · pré-preenchido pelo MERCADO · editável</p>
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <span style={{ color: '#00ff00', fontSize: '13px', flexShrink: 0 }}>&gt;</span>
+                <input
+                  value={beatName}
+                  onChange={e => setBeatName(e.target.value)}
+                  style={{ ...fieldStyle, borderBottom: '2px solid #00ff00', flex: 1 }}
+                />
+                <button
+                  onClick={() => analyze(beatName.trim(), null, null)}
+                  disabled={!beatName.trim()}
+                  style={{ ...retro, color: '#00ff00', border: '1px solid #00ff00', flexShrink: 0, padding: '6px 14px', opacity: beatName.trim() ? 1 : 0.4 }}
+                  onMouseEnter={e => { if (beatName.trim()) (e.currentTarget as HTMLElement).style.backgroundColor = '#001a00' }}
+                  onMouseLeave={e => { (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent' }}
+                >
+                  [ ANALISAR COM MERCADO ]
+                </button>
+              </div>
+              <p style={{ color: '#2a2a2a', fontSize: '10px', margin: '6px 0 0', letterSpacing: '0.5px' }}>
+                Podes analisar sem vídeo · adiciona o vídeo depois para publicar
+              </p>
+            </div>
+          )}
 
           {/* Video drop zone */}
           <div>

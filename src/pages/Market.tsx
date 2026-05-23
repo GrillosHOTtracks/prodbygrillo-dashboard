@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { Page } from '../types'
+import type { Page, MarketContext } from '../types'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -547,7 +547,12 @@ function CardTrending({ niches, markets, typeBeat }: {
 
 // ─── Card 2: LAIS ─────────────────────────────────────────────────────────────
 
-function CardLAIS({ data, loading, onSchedule }: { data: LaisData | null; loading?: boolean; onSchedule?: (title: string) => void }) {
+function CardLAIS({ data, loading, marketData, onSchedule }: {
+  data:        LaisData | null
+  loading?:    boolean
+  marketData?: MarketData
+  onSchedule?: (ctx: MarketContext) => void
+}) {
   const [btnHover, setBtnHover] = useState(false)
 
   if (loading && !data) return (
@@ -602,7 +607,15 @@ function CardLAIS({ data, loading, onSchedule }: { data: LaisData | null; loadin
         </p>
         {onSchedule && (
           <button
-            onClick={() => onSchedule(data.fazerAgora.titulo)}
+            onClick={() => onSchedule({
+              artist:    data.oportunidade.artista,
+              niche:     data.oportunidade.nicho,
+              keywords:  marketData?.typeBeat.referenceArtists ?? [],
+              hotMarket: data.mercadoQuente,
+              bpm:       data.fazerAgora.bpm,
+              key:       data.fazerAgora.tom,
+              title:     data.fazerAgora.titulo,
+            })}
             onMouseEnter={() => setBtnHover(true)}
             onMouseLeave={() => setBtnHover(false)}
             style={{
@@ -790,7 +803,10 @@ function CardComments({ data, loading }: { data: CommentInsights | null; loading
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 
-export function Market({ onNavigate }: { onNavigate?: (page: Page) => void }) {
+export function Market({ onNavigate, onUseInScheduler }: {
+  onNavigate?:       (page: Page) => void
+  onUseInScheduler?: (ctx: MarketContext) => void
+}) {
   const [data, setData]           = useState<MarketData | null>(null)
   const [loading, setLoading]     = useState(true)
   const [error, setError]         = useState('')
@@ -901,7 +917,8 @@ export function Market({ onNavigate }: { onNavigate?: (page: Page) => void }) {
             <CardLAIS
               data={laisData}
               loading={laisLoading}
-              onSchedule={onNavigate ? (_title) => { onNavigate('scheduler') } : undefined}
+              marketData={data ?? undefined}
+              onSchedule={onUseInScheduler}
             />
             <CardChannels channels={data.channels ?? []} />
             <CardComments data={commData} loading={commLoading} />

@@ -12,7 +12,7 @@ import { BeatStore } from './pages/BeatStore'
 import { Market } from './pages/Market'
 import { Plan } from './pages/Plan'
 import { api } from './lib/api'
-import type { Page, DateRange } from './types'
+import type { Page, DateRange, MarketContext } from './types'
 import type { DailyRow, ChannelInfo, Video as ApiVideo, AudienceResponse, ArtistTrend, TrafficSource, MonthlyRevenue } from './lib/api'
 
 // ─── Auth overlay ──────────────────────────────────────────────────────────────
@@ -115,6 +115,7 @@ export default function App() {
   const [dateRange, setDateRange]               = useState<DateRange>('28d')
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [schedulerPreset, setSchedulerPreset]   = useState<string | undefined>(undefined)
+  const [marketContext, setMarketContext]         = useState<MarketContext | undefined>(undefined)
 
   // Auth
   const [authChecked, setAuthChecked]           = useState(false)
@@ -236,11 +237,20 @@ export default function App() {
       case 'revenue':
         return <Revenue revenueMonthly={revenueMonthly} revenueIncluded={revenueIncluded} />
       case 'scheduler':
-        return <Scheduler onNavigate={setPage} presetArtist={schedulerPreset} onPresetConsumed={() => setSchedulerPreset(undefined)} />
+        return <Scheduler
+          onNavigate={setPage}
+          presetArtist={schedulerPreset}
+          onPresetConsumed={() => setSchedulerPreset(undefined)}
+          marketContext={marketContext}
+          onMarketContextConsumed={() => setMarketContext(undefined)}
+        />
       case 'beatstore':
         return <BeatStore onNavigate={setPage} />
       case 'market':
-        return <Market onNavigate={setPage} />
+        return <Market
+          onNavigate={setPage}
+          onUseInScheduler={(ctx) => { setMarketContext(ctx); setPage('scheduler') }}
+        />
       case 'plan':
         return <Plan channelInfo={channelInfo} analyticsData={analyticsData} videos={videos} onNavigate={setPage} />
       case 'settings':

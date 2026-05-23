@@ -173,7 +173,7 @@ function buildDescription(parsed, beatName, detectedBpm, detectedKey) {
   ].join('\n')
 }
 
-function buildPrompt(beatName, detectedBpm, detectedKey) {
+function buildPrompt(beatName, detectedBpm, detectedKey, marketCtx) {
   const now    = new Date()
   const month  = now.toLocaleString('en-US', { month: 'long' })
   const year   = now.getFullYear()
@@ -196,6 +196,19 @@ function buildPrompt(beatName, detectedBpm, detectedKey) {
       (detectedKey !== null ? `- Key: ${detectedKey}\n` : '')
     : ''
 
+  const marketNote = marketCtx
+    ? `\n\nMARKET INTELLIGENCE — live YouTube data — OVERRIDE all generic choices:\n` +
+      `- Primary trending artist: ${marketCtx.artist} → MUST be first in matchingArtists and in optimizedTitle\n` +
+      `- Hot niche right now: ${marketCtx.niche}\n` +
+      `- Hot market: ${marketCtx.hotMarket}\n` +
+      `- Top reference artists (use as tags + secondary matchingArtists): ${(marketCtx.keywords || []).slice(0, 8).join(', ')}\n` +
+      (!detectedBpm && marketCtx.bpm ? `- Niche BPM suggestion: ${marketCtx.bpm} — use this as bpm if not detected from audio\n` : '') +
+      (!detectedKey && marketCtx.key ? `- Niche key suggestion: ${marketCtx.key} — use this as key if not detected from audio\n` : '') +
+      `- Tags MUST include the top reference artists above + market-specific keywords\n` +
+      `- Hashtags MUST target ${marketCtx.hotMarket} market\n` +
+      `- thumbnail.concept MUST reflect the ${marketCtx.niche} aesthetic (colors, mood, composition)\n`
+    : ''
+
   return `You are an expert in YouTube SEO and digital marketing for beat producers, with encyclopedic knowledge of RnB, PluggnB, Melodic Trap, Drill, Afrobeats, and all instrumental/type-beat subgenres.
 
 VARIATION SEED: ${seed}
@@ -204,7 +217,7 @@ CREATIVE ANGLE FOR THIS ANALYSIS: ${angle}
 You MUST produce a completely unique analysis every time. Never reuse titles, tags, or suggestions from previous analyses. The seed and angle above must influence your output in a measurable way.
 
 Analyze the following beat name for a YouTube upload:
-"${beatName}"${audioNote}
+"${beatName}"${audioNote}${marketNote}
 
 Context: it is ${month} ${year}. You have deep knowledge of:
 - Current trending artists across all subgenres of trap, RnB, PluggnB, melodic rap
@@ -295,7 +308,7 @@ Return ONLY valid JSON, no markdown, no extra text. Use this exact structure:
 
 // POST /api/ai/analyze-beat  — streams SSE
 router.post('/analyze-beat', async (req, res) => {
-  const { beatName, bpm, key } = req.body
+  const { beatName, bpm, key, marketContext } = req.body
   if (!beatName || typeof beatName !== 'string' || !beatName.trim()) {
     return res.status(400).json({ error: 'beatName is required' })
   }
@@ -330,7 +343,7 @@ router.post('/analyze-beat', async (req, res) => {
           model: MODELS[mi],
           max_tokens: 3500,
           stream: true,
-          messages: [{ role: 'user', content: buildPrompt(beatName.trim(), detectedBpm, detectedKey) }],
+          messages: [{ role: 'user', content: buildPrompt(beatName.trim(), detectedBpm, detectedKey, marketContext || null) }],
         })
         for await (const chunk of stream) {
           const text = chunk.choices[0]?.delta?.content || ''
