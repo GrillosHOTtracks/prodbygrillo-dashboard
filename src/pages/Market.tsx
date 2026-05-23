@@ -121,8 +121,14 @@ function CardTrending({ niches, markets, typeBeat, hottestNiche, hottestMarket }
 
   const maxNicheTotal = niches[0]?.total || 1
   const maxMktTotal   = markets[0]?.total || 1
-  const hotNicheLabel = niches.find(n => n.id === hottestNiche)?.label || hottestNiche
   const noData        = niches.every(n => n.total === 0)
+
+  // Header reflects current filter context
+  const ctxNiche  = filterNiche === 'all'
+    ? niches.find(n => n.id === hottestNiche)
+    : niches.find(n => n.id === filterNiche)
+  const ctxLabel  = ctxNiche?.label  || hottestNiche
+  const ctxMarket = filterNiche === 'all' ? hottestMarket : (ctxNiche?.hotMarket ?? hottestMarket)
 
   // Flat video list: global sort by views desc, then apply niche + views filters
   const allVideos: (VideoItem & { nicheLabel: string })[] = niches
@@ -153,9 +159,9 @@ function CardTrending({ niches, markets, typeBeat, hottestNiche, hottestMarket }
           <p style={{ ...lbl, color: 'var(--text-faint)' }}>a pesquisar — aguarda cache</p>
         ) : (
           <p style={{ ...lbl, margin: 0 }}>
-            nicho: <span style={{ color: 'var(--accent)' }}>{hotNicheLabel}</span>
-            &nbsp;·&nbsp;mercado: <span style={{ color: 'var(--accent)' }}>{hottestMarket.flag} {hottestMarket.label}</span>
-            &nbsp;·&nbsp;<span style={{ opacity: 0.7 }}>{allVideos.length} vídeos</span>
+            nicho: <span style={{ color: 'var(--accent)' }}>{ctxLabel}</span>
+            &nbsp;·&nbsp;mercado: <span style={{ color: 'var(--accent)' }}>{ctxMarket.flag} {ctxMarket.label}</span>
+            &nbsp;·&nbsp;<span style={{ opacity: 0.7 }}>{filteredVideos.length} vídeos</span>
           </p>
         )}
       </div>
