@@ -109,12 +109,10 @@ function TabBtn({ active, onClick, children }: { active: boolean; onClick: () =>
 
 type TrendingTab = 'niches' | 'markets' | 'videos' | 'typebeat'
 
-function CardTrending({ niches, markets, typeBeat, hottestNiche, hottestMarket }: {
-  niches:        NicheResult[]
-  markets:       MarketResult[]
-  typeBeat:      TypeBeatResult
-  hottestNiche:  string
-  hottestMarket: { gl: string; flag: string; label: string }
+function CardTrending({ niches, markets, typeBeat }: {
+  niches:   NicheResult[]
+  markets:  MarketResult[]
+  typeBeat: TypeBeatResult
 }) {
   const [tab, setTab]             = useState<TrendingTab>('videos')
   const [filterNiche, setFilter]  = useState<string>('all')
@@ -494,8 +492,6 @@ export function Market() {
             niches={data.niches}
             markets={data.markets}
             typeBeat={data.typeBeat}
-            hottestNiche={data.hottestNiche}
-            hottestMarket={data.hottestMarket}
           />
           <CardLAIS data={data.lais} />
         </div>
