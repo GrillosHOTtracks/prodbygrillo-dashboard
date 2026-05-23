@@ -611,12 +611,11 @@ Reply ONLY in valid JSON (no markdown, no text before or after):
                     </div>
                   </div>
 
-                  {/* Comments: PT-BR + EN */}
+                  {/* Comments: PT + EN */}
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '8px' }}>
                     {item.commentPt && (
                       <div style={{ backgroundColor: '#050505', border: '1px solid #1a2a1a', padding: '7px 10px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                          <span style={{ color: '#00aa00', fontSize: '9px', letterSpacing: '1px' }}>🇧🇷 PT-BR</span>
+                        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '4px' }}>
                           <CopyBtn text={item.commentPt} label="[ COPIAR PT ]" />
                         </div>
                         <p style={{ color: '#a0a0a0', fontSize: '11px', margin: 0, lineHeight: 1.5, fontStyle: 'italic' }}>
@@ -626,8 +625,7 @@ Reply ONLY in valid JSON (no markdown, no text before or after):
                     )}
                     {item.commentEn && (
                       <div style={{ backgroundColor: '#050505', border: '1px solid #1a2030', padding: '7px 10px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                          <span style={{ color: '#5588aa', fontSize: '9px', letterSpacing: '1px' }}>🇺🇸 EN</span>
+                        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '4px' }}>
                           <CopyBtn text={item.commentEn} label="[ COPIAR EN ]" />
                         </div>
                         <p style={{ color: '#a0a0a0', fontSize: '11px', margin: 0, lineHeight: 1.5, fontStyle: 'italic' }}>
@@ -640,14 +638,14 @@ Reply ONLY in valid JSON (no markdown, no text before or after):
                   {/* Actions */}
                   <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                     <a
-                      href={`https://www.youtube.com/watch?v=${item.videoId}`}
+                      href={`https://www.youtube.com/watch?v=${item.videoId}&lc=new&comment=${encodeURIComponent(item.commentEn)}`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      style={{ background: 'transparent', border: '1px solid #2a2a2a', color: '#707070', fontSize: '9px', padding: '3px 8px', fontFamily: 'Courier New, monospace', letterSpacing: '0.5px', textDecoration: 'none', flexShrink: 0 }}
-                      onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = '#555555'; (e.currentTarget as HTMLElement).style.color = '#c0c0c0' }}
-                      onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = '#2a2a2a'; (e.currentTarget as HTMLElement).style.color = '#707070' }}
+                      style={{ background: 'transparent', border: '1px solid #1a2030', color: '#5588aa', fontSize: '9px', padding: '3px 8px', fontFamily: 'Courier New, monospace', letterSpacing: '0.5px', textDecoration: 'none', flexShrink: 0 }}
+                      onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = '#336699'; (e.currentTarget as HTMLElement).style.color = '#88bbdd' }}
+                      onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = '#1a2030'; (e.currentTarget as HTMLElement).style.color = '#5588aa' }}
                     >
-                      [ ABRIR VÍDEO ]
+                      [ COMENTAR ]
                     </a>
                     <button
                       onClick={() => toggleEngDone(item.videoId)}
