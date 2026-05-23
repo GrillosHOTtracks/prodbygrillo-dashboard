@@ -1,8 +1,10 @@
 require('dotenv').config()
-const express = require('express')
-const fs      = require('fs')
-const path    = require('path')
-const os      = require('os')
+const express        = require('express')
+const fs             = require('fs')
+const path           = require('path')
+const os             = require('os')
+const { google }     = require('googleapis')
+const accountManager = require('../accountManager')
 
 const router     = express.Router()
 const CACHE_FILE = path.join(os.tmpdir(), 'market_cache.json')
@@ -393,6 +395,49 @@ router.get('/', async (req, res) => {
     console.error('[market]', err.message)
     res.status(500).json({ error: 'Market unavailable', details: err.message })
   }
+})
+
+// ─── GET /comments — top 5 vídeos, 20 comentários cada, cache 1h ─────────────
+
+let _commentCache = {}   // { [videoId]: { comments: string[], ts: number } }
+const COMMENT_TTL = 60 * 60 * 1000
+
+router.get('/comments', async (req, res) => {
+  const raw = String(req.query.videoIds || '')
+  const ids = raw.split(',').map(s => s.trim()).filter(Boolean).slice(0, 5)
+  if (!ids.length) return res.status(400).json({ error: 'videoIds required' })
+
+  const results = []
+  for (const videoId of ids) {
+    if (_commentCache[videoId] && Date.now() - _commentCache[videoId].ts < COMMENT_TTL) {
+      results.push({ videoId, comments: _commentCache[videoId].comments })
+      continue
+    }
+    try {
+      const resp = await accountManager.withPublicYouTube(async auth => {
+        const yt = google.youtube({ version: 'v3', auth })
+        return yt.commentThreads.list({
+          videoId,
+          maxResults: 20,
+          order: 'relevance',
+          part: ['snippet'],
+          textFormat: 'plainText',
+        })
+      })
+      const comments = (resp.data?.items || [])
+        .map(item => item.snippet?.topLevelComment?.snippet?.textDisplay || '')
+        .filter(Boolean)
+      _commentCache[videoId] = { comments, ts: Date.now() }
+      results.push({ videoId, comments })
+    } catch (err) {
+      console.warn(`[market/comments] ${videoId}:`, err.message)
+      results.push({ videoId, comments: [] })
+    }
+  }
+
+  const total = results.reduce((s, r) => s + r.comments.length, 0)
+  console.log(`[market/comments] ${ids.length} vídeos · ${total} comentários`)
+  res.json({ results })
 })
 
 module.exports = router

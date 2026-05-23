@@ -37,6 +37,13 @@ interface TypeBeatResult {
   referenceArtists: string[]
 }
 
+interface CommentInsights {
+  audienceWants:    string
+  mentionedArtists: string[]
+  vibes:            string[]
+  feedback:         string
+}
+
 interface LaisData {
   oportunidade:  { artista: string; nicho: string; mercado: string; porque: string }
   fazerAgora:    { titulo: string; bpm: number | string; tom: string }
@@ -105,6 +112,67 @@ Responde APENAS com JSON válido (sem markdown, sem texto antes ou depois):
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify({ question, context: null, history: [] }),
+    })
+    if (!res.ok || !res.body) return null
+
+    const reader  = res.body.getReader()
+    const decoder = new TextDecoder()
+    let rawBuf = '', full = ''
+
+    outer: while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      rawBuf += decoder.decode(value, { stream: true })
+      const lines = rawBuf.split('\n')
+      rawBuf = lines.pop() ?? ''
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue
+        const payload = line.slice(6).trim()
+        if (payload === '[DONE]') break outer
+        try {
+          const evt = JSON.parse(payload)
+          if (evt.error) throw new Error(evt.error)
+          if (evt.text) full += evt.text
+        } catch (e) { if (!(e instanceof SyntaxError)) throw e }
+      }
+    }
+
+    const m = full.match(/\{[\s\S]*\}/)
+    if (!m) return null
+    return JSON.parse(m[0])
+  } catch { return null }
+}
+
+// ─── Comment insights — GET /api/market/comments + POST /api/ai/chat ─────────
+
+async function fetchCommentInsights(videoIds: string[]): Promise<CommentInsights | null> {
+  // Step 1: fetch raw comments from backend (cache 1h)
+  const commRes = await fetch(`/api/market/comments?videoIds=${videoIds.slice(0, 5).join(',')}`)
+  if (!commRes.ok) return null
+  const { results } = await commRes.json() as { results: { videoId: string; comments: string[] }[] }
+  const allComments = results.flatMap(r => r.comments)
+  if (!allComments.length) return null
+
+  // Step 2: LAIS analysis via /api/ai/chat (SSE, same pattern as fetchLAIS)
+  const sample = allComments.slice(0, 60).join('\n')
+  const question = `Estes são comentários reais de vídeos de type beats no YouTube. Analisa como produtor de beats:
+
+COMENTÁRIOS (${allComments.length} total, amostra de ${Math.min(allComments.length, 60)}):
+${sample}
+
+Responde APENAS com JSON válido (sem markdown, sem texto antes ou depois):
+{
+  "audienceWants": "<1-2 frases: o que os ouvintes/rappers pedem nestes comentários>",
+  "mentionedArtists": ["<artista mencionado 1>", "<artista 2>", "<artista 3>"],
+  "vibes": ["<vibe/estilo pedido 1>", "<vibe 2>", "<vibe 3>", "<vibe 4>"],
+  "feedback": "<1 frase: feedback geral dado ao produtor nestes comentários>"
+}`
+
+  try {
+    const res = await fetch('/api/ai/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question, context: null, history: [] }),
     })
     if (!res.ok || !res.body) return null
 
@@ -562,19 +630,95 @@ function CardLAIS({ data, loading, onSchedule }: { data: LaisData | null; loadin
   )
 }
 
+// ─── Card 3: O QUE O PÚBLICO QUER ────────────────────────────────────────────
+
+function CardComments({ data, loading }: { data: CommentInsights | null; loading?: boolean }) {
+  if (loading && !data) return (
+    <div style={{ ...card, minHeight: 160 }}>
+      <p style={heading}>┌─ O QUE O PÚBLICO QUER ─</p>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+        <p style={{ color: 'var(--text-faint)', fontSize: '10px', letterSpacing: '2px' }}>
+          A ANALISAR COMENTÁRIOS<span className="blink">_</span>
+        </p>
+        <p style={{ color: 'var(--text-faint)', fontSize: '9px', opacity: 0.5 }}>top 5 vídeos · 20 comentários cada</p>
+      </div>
+    </div>
+  )
+
+  if (!data) return null
+
+  return (
+    <div style={{ ...card, minHeight: 'unset', gap: '10px' }}>
+      <p style={heading}>┌─ O QUE O PÚBLICO QUER ─</p>
+
+      {/* O que pedem */}
+      <div style={{ padding: '10px 12px', backgroundColor: 'var(--accent-muted)', border: '1px solid var(--accent-border)' }}>
+        <p style={{ ...lbl, color: 'var(--accent)', marginBottom: 5 }}>💬 O QUE PEDEM</p>
+        <p style={{ color: 'var(--text-dim)', fontSize: '10px', margin: 0, lineHeight: 1.6 }}>
+          {data.audienceWants}
+        </p>
+      </div>
+
+      {/* Artistas mencionados */}
+      {data.mentionedArtists.length > 0 && (
+        <div style={{ padding: '10px 12px', backgroundColor: '#0a0a0a', border: '1px solid var(--border)' }}>
+          <p style={{ ...lbl, marginBottom: 6 }}>🎤 ARTISTAS MENCIONADOS</p>
+          <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+            {data.mentionedArtists.map((a, i) => (
+              <span key={i} style={{
+                fontSize: '9px', padding: '2px 7px',
+                border: `1px solid ${i === 0 ? 'var(--accent-border)' : 'var(--border)'}`,
+                color: i === 0 ? 'var(--accent)' : 'var(--text-dim)',
+                backgroundColor: i === 0 ? 'var(--accent-muted)' : 'transparent',
+              }}>{a}</span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Vibes pedidas */}
+      {data.vibes.length > 0 && (
+        <div style={{ padding: '10px 12px', backgroundColor: '#0a0a0a', border: '1px solid var(--border)' }}>
+          <p style={{ ...lbl, marginBottom: 6 }}>✨ VIBES PEDIDAS</p>
+          <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+            {data.vibes.map((v, i) => (
+              <span key={i} style={{
+                fontSize: '9px', padding: '2px 7px',
+                border: '1px solid var(--border)',
+                color: 'var(--text-dim)',
+              }}>{v}</span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Feedback geral */}
+      <div style={{ padding: '8px 12px', border: '1px solid var(--border)', backgroundColor: '#050505' }}>
+        <p style={{ ...lbl, marginBottom: 4 }}>📝 FEEDBACK GERAL</p>
+        <p style={{ color: 'var(--text-dim)', fontSize: '10px', margin: 0, lineHeight: 1.6 }}>
+          {data.feedback}
+        </p>
+      </div>
+    </div>
+  )
+}
+
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export function Market({ onNavigate }: { onNavigate?: (page: Page) => void }) {
   const [data, setData]           = useState<MarketData | null>(null)
   const [loading, setLoading]     = useState(true)
   const [error, setError]         = useState('')
-  const [laisData, setLaisData]   = useState<LaisData | null>(null)
-  const [laisLoading, setLaisLoading] = useState(false)
+  const [laisData, setLaisData]         = useState<LaisData | null>(null)
+  const [laisLoading, setLaisLoading]   = useState(false)
+  const [commData, setCommData]         = useState<CommentInsights | null>(null)
+  const [commLoading, setCommLoading]   = useState(false)
 
   const load = (bust = false) => {
     setLoading(true)
     setError('')
     setLaisData(null)
+    setCommData(null)
     fetch(`/api/market${bust ? '?bust=1' : ''}`)
       .then(r => r.ok ? r.json() : Promise.reject(r.statusText))
       .then(d => { setData(d); setLoading(false) })
@@ -585,11 +729,28 @@ export function Market({ onNavigate }: { onNavigate?: (page: Page) => void }) {
 
   useEffect(() => {
     if (!data || !data.niches.some(n => n.total > 0)) return
+
+    // LAIS analysis
     setLaisLoading(true)
     fetchLAIS(data)
       .then(setLaisData)
       .catch(() => setLaisData(null))
       .finally(() => setLaisLoading(false))
+
+    // Comment insights — top 5 videos by views across all niches
+    const topVideoIds = data.niches
+      .flatMap(n => n.sample)
+      .filter(v => v.videoId)
+      .sort((a, b) => b.views - a.views)
+      .slice(0, 5)
+      .map(v => v.videoId!)
+    if (topVideoIds.length) {
+      setCommLoading(true)
+      fetchCommentInsights(topVideoIds)
+        .then(setCommData)
+        .catch(() => setCommData(null))
+        .finally(() => setCommLoading(false))
+    }
   }, [data])
 
   const updatedLabel = data?.updatedAt
@@ -651,11 +812,14 @@ export function Market({ onNavigate }: { onNavigate?: (page: Page) => void }) {
             markets={data.markets}
             typeBeat={data.typeBeat}
           />
-          <CardLAIS
-            data={laisData}
-            loading={laisLoading}
-            onSchedule={onNavigate ? (_title) => { onNavigate('scheduler') } : undefined}
-          />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <CardLAIS
+              data={laisData}
+              loading={laisLoading}
+              onSchedule={onNavigate ? (_title) => { onNavigate('scheduler') } : undefined}
+            />
+            <CardComments data={commData} loading={commLoading} />
+          </div>
         </div>
       ) : null}
 
