@@ -3,7 +3,6 @@ const express = require('express')
 const fs      = require('fs')
 const path    = require('path')
 const os      = require('os')
-const Groq    = require('groq-sdk')
 
 const router     = express.Router()
 const CACHE_FILE = path.join(os.tmpdir(), 'market_cache.json')
@@ -276,6 +275,7 @@ function aggregateResults(results) {
 }
 
 // ─── Catálogo — proxy de uploads do Scheduler ─────────────────────────────────
+// (LAIS analysis moved to frontend via POST /api/ai/chat — GROQ_API_KEY lives there)
 
 const UPLOADS_FILE = path.join(__dirname, '../data/uploads.json')
 
@@ -303,88 +303,6 @@ function buildCatalog() {
   }
 }
 
-// ─── LAIS — só responde com dados reais ──────────────────────────────────────
-
-console.log(`[market] GROQ_API_KEY: ${process.env.GROQ_API_KEY ? '✓ configurada' : '✗ NÃO CONFIGURADA — LAIS desactivada'}`)
-
-async function analyzeWithLAIS(trending) {
-  const apiKey = process.env.GROQ_API_KEY
-  if (!apiKey) return null
-
-  const hasData = trending.niches.some(n => n.total > 0)
-  if (!hasData) return {
-    oportunidade:  { artista: '—', nicho: '—', mercado: '—', porque: 'Aguardando dados de mercado.' },
-    fazerAgora:    { titulo: '—', bpm: '—', tom: '—' },
-    insights:      { nichoCrescendo: '—', artistaSubindo: '—', evitar: '—' },
-    mercadoQuente: 'Aguardando dados de mercado.',
-  }
-
-  const { monthEn, year } = getDate()
-
-  const topNiches = trending.niches.slice(0, 4)
-    .map(n => `${n.label}: ${n.total} vídeos, top mercado ${n.hotMarket.flag} ${n.hotMarket.label}`)
-    .join(' | ')
-
-  const topMarkets = trending.markets.slice(0, 4)
-    .map(m => `${m.flag} ${m.label}: ${m.total} vídeos, nicho dominante ${m.topNiche}`)
-    .join(' | ')
-
-  const typeBeatLine = trending.typeBeat.referenceArtists.length
-    ? `Artistas mais buscados como type beat: ${trending.typeBeat.referenceArtists.slice(0, 8).join(', ')}`
-    : 'Sem dados de type beats.'
-
-  const nichoTop    = trending.niches[0]?.label || '—'
-  const mercadoTop  = trending.markets[0]
-  const artistaRef  = trending.typeBeat.referenceArtists[0] || trending.niches[0]?.topArtists?.[0] || '—'
-
-  const prompt = `És LAIS, analista de mercado para produtores de beats independentes. Usa APENAS os dados abaixo. Nunca inventes artistas, números ou tendências que não estejam nos dados.
-
-DADOS REAIS (YouTube, ${new Date().toLocaleDateString('pt-BR')}):
-Nichos: ${topNiches}
-Mercados: ${topMarkets}
-${typeBeatLine}
-
-Nicho mais quente agora: ${nichoTop}
-Mercado mais quente agora: ${mercadoTop ? mercadoTop.flag + ' ' + mercadoTop.label : '—'}
-Artista de referência principal: ${artistaRef}
-Mês atual: ${monthEn} ${year}
-
-Responde APENAS com JSON válido (sem markdown, sem texto antes ou depois):
-{
-  "oportunidade": {
-    "artista": "<artista real dos type beats — usa ${artistaRef} ou outro dos dados>",
-    "nicho": "<nicho mais quente dos dados>",
-    "mercado": "<flag + nome do mercado mais quente>",
-    "porque": "<1 linha: razão baseada nos dados — ex: X vídeos encontrados, mercado em crescimento>"
-  },
-  "fazerAgora": {
-    "titulo": "<sugestão de título real: [FREE] Artista Type Beat ${monthEn} ${year} - Vibe>",
-    "bpm": <número inteiro recomendado para o nicho>,
-    "tom": "<tom musical recomendado em inglês, ex: A minor>"
-  },
-  "insights": {
-    "nichoCrescendo": "<nicho mais quente + quantidade de vídeos encontrados>",
-    "artistaSubindo": "<artista real dos dados + contexto>",
-    "evitar": "<nicho com menos dados — ex: menos resultados encontrados>"
-  },
-  "mercadoQuente": "<flag País · nicho · 1 motivo curto baseado nos dados>"
-}`
-
-  try {
-    const groq = new Groq({ apiKey })
-    const resp = await groq.chat.completions.create({
-      messages: [{ role: 'user', content: prompt }],
-      model: 'llama-3.3-70b-versatile',
-      max_tokens: 600,
-      temperature: 0.25,
-    })
-    const text = resp.choices[0]?.message?.content || ''
-    const m = text.match(/\{[\s\S]*\}/)
-    if (!m) return null
-    return JSON.parse(m[0])
-  } catch (e) { console.warn('[market] LAIS:', e.message); return null }
-}
-
 // ─── Route ────────────────────────────────────────────────────────────────────
 
 router.get('/', async (req, res) => {
@@ -402,9 +320,8 @@ router.get('/', async (req, res) => {
     )
 
     const trending = aggregateResults(rawResults)
-    const lais = await analyzeWithLAIS(trending, null)
 
-    const result = { updatedAt: new Date().toISOString(), ...trending, lais }
+    const result = { updatedAt: new Date().toISOString(), ...trending }
     _cache = result; _cacheTs = Date.now()
     saveDisk(result)
     res.json(result)

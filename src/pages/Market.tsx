@@ -51,7 +51,89 @@ interface MarketData {
   typeBeat:     TypeBeatResult
   hottestNiche: string
   hottestMarket: { gl: string; flag: string; label: string }
-  lais:         LaisData | null
+}
+
+// ─── LAIS — chama POST /api/ai/chat como AIChat.tsx ──────────────────────────
+
+async function fetchLAIS(trending: MarketData): Promise<LaisData | null> {
+  const monthEn = new Date().toLocaleString('en-US', { month: 'long' })
+  const year    = new Date().getFullYear()
+  const date    = new Date().toLocaleDateString('pt-BR')
+
+  const topNiches  = trending.niches.slice(0, 4)
+    .map(n => `${n.label}: ${n.total} vídeos, top ${n.hotMarket.flag} ${n.hotMarket.label}`)
+    .join(' | ')
+  const topMarkets = trending.markets.slice(0, 4)
+    .map(m => `${m.flag} ${m.label}: ${m.total} vídeos, nicho ${m.topNiche}`)
+    .join(' | ')
+  const artistaRef = trending.typeBeat.referenceArtists[0]
+    || trending.niches[0]?.topArtists?.[0] || '—'
+  const typeBeatLine = trending.typeBeat.referenceArtists.slice(0, 6).join(', ') || '—'
+
+  const question = `Dados de mercado YouTube (${date}):
+Nichos: ${topNiches}
+Mercados: ${topMarkets}
+Artistas type beat: ${typeBeatLine}
+Artista referência principal: ${artistaRef}
+Nicho mais quente: ${trending.niches[0]?.label || '—'}
+Mercado mais quente: ${trending.markets[0]?.flag || ''} ${trending.markets[0]?.label || '—'}
+Mês: ${monthEn} ${year}
+
+Responde APENAS com JSON válido (sem markdown, sem texto antes ou depois):
+{
+  "oportunidade": {
+    "artista": "<artista real dos dados>",
+    "nicho": "<nicho mais quente>",
+    "mercado": "<flag + nome do mercado>",
+    "porque": "<1 linha com dados reais>"
+  },
+  "fazerAgora": {
+    "titulo": "<[FREE] Artista Type Beat ${monthEn} ${year} - Vibe>",
+    "bpm": <número inteiro>,
+    "tom": "<ex: A minor>"
+  },
+  "insights": {
+    "nichoCrescendo": "<nicho + quantidade de vídeos>",
+    "artistaSubindo": "<artista dos dados + contexto>",
+    "evitar": "<nicho com menos resultados>"
+  },
+  "mercadoQuente": "<flag País · nicho · 1 motivo curto>"
+}`
+
+  try {
+    const res = await fetch('/api/ai/chat', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ question, context: null, history: [] }),
+    })
+    if (!res.ok || !res.body) return null
+
+    const reader  = res.body.getReader()
+    const decoder = new TextDecoder()
+    let rawBuf = '', full = ''
+
+    outer: while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      rawBuf += decoder.decode(value, { stream: true })
+      const lines = rawBuf.split('\n')
+      rawBuf = lines.pop() ?? ''
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue
+        const payload = line.slice(6).trim()
+        if (payload === '[DONE]') break outer
+        try {
+          const evt = JSON.parse(payload)
+          if (evt.error) throw new Error(evt.error)
+          if (evt.text) full += evt.text
+        } catch (e) { if (!(e instanceof SyntaxError)) throw e }
+      }
+    }
+
+    const m = full.match(/\{[\s\S]*\}/)
+    if (!m) return null
+    return JSON.parse(m[0])
+  } catch { return null }
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
@@ -383,15 +465,27 @@ function CardTrending({ niches, markets, typeBeat }: {
 
 // ─── Card 2: LAIS ─────────────────────────────────────────────────────────────
 
-function CardLAIS({ data, onSchedule }: { data: LaisData | null; onSchedule?: (title: string) => void }) {
+function CardLAIS({ data, loading, onSchedule }: { data: LaisData | null; loading?: boolean; onSchedule?: (title: string) => void }) {
   const [btnHover, setBtnHover] = useState(false)
+
+  if (loading && !data) return (
+    <div style={card}>
+      <p style={heading}>┌─ LAIS · RADAR DE MERCADO ─</p>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+        <p style={{ color: 'var(--text-faint)', fontSize: '10px', letterSpacing: '2px' }}>
+          A ANALISAR MERCADO<span className="blink">_</span>
+        </p>
+        <p style={{ color: 'var(--text-faint)', fontSize: '9px', opacity: 0.5 }}>via /api/ai/chat</p>
+      </div>
+    </div>
+  )
 
   if (!data) return (
     <div style={card}>
       <p style={heading}>┌─ LAIS · RADAR DE MERCADO ─</p>
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         <p style={{ color: 'var(--text-faint)', fontSize: '10px', letterSpacing: '1px' }}>
-          GROQ_API_KEY NÃO CONFIGURADA
+          sem dados — aguarda mercado carregar
         </p>
       </div>
     </div>
@@ -471,13 +565,16 @@ function CardLAIS({ data, onSchedule }: { data: LaisData | null; onSchedule?: (t
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export function Market({ onNavigate }: { onNavigate?: (page: Page) => void }) {
-  const [data, setData]       = useState<MarketData | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError]     = useState('')
+  const [data, setData]           = useState<MarketData | null>(null)
+  const [loading, setLoading]     = useState(true)
+  const [error, setError]         = useState('')
+  const [laisData, setLaisData]   = useState<LaisData | null>(null)
+  const [laisLoading, setLaisLoading] = useState(false)
 
   const load = (bust = false) => {
     setLoading(true)
     setError('')
+    setLaisData(null)
     fetch(`/api/market${bust ? '?bust=1' : ''}`)
       .then(r => r.ok ? r.json() : Promise.reject(r.statusText))
       .then(d => { setData(d); setLoading(false) })
@@ -485,6 +582,15 @@ export function Market({ onNavigate }: { onNavigate?: (page: Page) => void }) {
   }
 
   useEffect(() => { load() }, [])
+
+  useEffect(() => {
+    if (!data || !data.niches.some(n => n.total > 0)) return
+    setLaisLoading(true)
+    fetchLAIS(data)
+      .then(setLaisData)
+      .catch(() => setLaisData(null))
+      .finally(() => setLaisLoading(false))
+  }, [data])
 
   const updatedLabel = data?.updatedAt
     ? new Date(data.updatedAt).toLocaleString('pt', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
@@ -546,7 +652,8 @@ export function Market({ onNavigate }: { onNavigate?: (page: Page) => void }) {
             typeBeat={data.typeBeat}
           />
           <CardLAIS
-            data={data.lais}
+            data={laisData}
+            loading={laisLoading}
             onSchedule={onNavigate ? (_title) => { onNavigate('scheduler') } : undefined}
           />
         </div>
