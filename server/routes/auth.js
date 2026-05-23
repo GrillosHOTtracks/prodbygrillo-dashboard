@@ -2,7 +2,9 @@ const express = require('express')
 const fs   = require('fs')
 const path = require('path')
 const os   = require('os')
+const jwt  = require('jsonwebtoken')
 const accountManager = require('../accountManager')
+const { JWT_SECRET } = require('../middleware/dashboardAuth')
 
 const CACHE_FILES = [
   path.join(os.tmpdir(), 'channel_info.json'),
@@ -34,6 +36,36 @@ function isAllowedOrigin(origin) {
   )
 }
 
+// ─── Dashboard login (username/password) ──────────────────────────────────────
+router.post('/dashboard-login', (req, res) => {
+  const { username, password } = req.body || {}
+  const expectedUser = process.env.DASHBOARD_USERNAME || 'admin'
+  const expectedPass = process.env.DASHBOARD_PASSWORD
+
+  if (!expectedPass) {
+    // No password configured — issue a token with no expiry for dev mode
+    const token = jwt.sign({ sub: 'dev' }, JWT_SECRET, { expiresIn: '365d' })
+    return res.json({ token })
+  }
+
+  if (!username || !password) {
+    return res.status(400).json({ error: 'Username and password required' })
+  }
+
+  if (username !== expectedUser || password !== expectedPass) {
+    return res.status(401).json({ error: 'Credenciais inválidas' })
+  }
+
+  const token = jwt.sign({ sub: username }, JWT_SECRET, { expiresIn: '30d' })
+  res.json({ token })
+})
+
+router.get('/dashboard-verify', (_req, res) => {
+  // Middleware already validated the token — just confirm
+  res.json({ ok: true })
+})
+
+// ─── YouTube OAuth status ──────────────────────────────────────────────────────
 router.get('/status', (_req, res) => {
   res.json({ authenticated: accountManager.isAuthenticated() })
 })

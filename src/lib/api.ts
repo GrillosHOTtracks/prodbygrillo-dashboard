@@ -1,10 +1,28 @@
 const BASE = '/api'
 
+function authHeaders(): HeadersInit {
+  const token = localStorage.getItem('dashboard_token')
+  return token ? { Authorization: `Bearer ${token}` } : {}
+}
+
 async function get<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE}${path}`)
+  const res = await fetch(`${BASE}${path}`, { headers: authHeaders() })
   if (!res.ok) {
     const body = await res.json().catch(() => ({}))
     throw Object.assign(new Error(body.error || res.statusText), { status: res.status, code: body.code })
+  }
+  return res.json()
+}
+
+async function post<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) {
+    const b = await res.json().catch(() => ({}))
+    throw Object.assign(new Error(b.error || res.statusText), { status: res.status, code: b.code })
   }
   return res.json()
 }
@@ -91,10 +109,16 @@ export type AudienceResponse = {
 } & Cacheable
 
 export const api = {
+  dashboard: {
+    login:  (username: string, password: string) =>
+      post<{ token: string }>('/auth/dashboard-login', { username, password }),
+    verify: () => get<{ ok: boolean }>('/auth/dashboard-verify'),
+    logout: () => { localStorage.removeItem('dashboard_token') },
+  },
   auth: {
     status:  ()         => get<AuthStatus>('/auth/status'),
     url:     ()         => get<{ url: string }>(`/auth/url?origin=${encodeURIComponent(window.location.origin)}`),
-    logout:  async ()   => { await fetch(`${BASE}/auth/logout`, { method: 'POST' }) },
+    logout:  async ()   => { await fetch(`${BASE}/auth/logout`, { method: 'POST', headers: authHeaders() }) },
   },
   accounts: {
     status:     ()  => get<AccountsStatus>('/accounts/status'),

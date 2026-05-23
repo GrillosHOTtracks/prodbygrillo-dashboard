@@ -15,6 +15,111 @@ import { api } from './lib/api'
 import type { Page, DateRange, MarketContext } from './types'
 import type { DailyRow, ChannelInfo, Video as ApiVideo, AudienceResponse, ArtistTrend, TrafficSource, MonthlyRevenue } from './lib/api'
 
+// ─── Dashboard login overlay ───────────────────────────────────────────────────
+function LoginOverlay({ onSuccess }: { onSuccess: () => void }) {
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [loading,  setLoading]  = useState(false)
+  const [error,    setError]    = useState('')
+
+  async function handleLogin(e: React.FormEvent) {
+    e.preventDefault()
+    setLoading(true)
+    setError('')
+    try {
+      const { token } = await api.dashboard.login(username, password)
+      localStorage.setItem('dashboard_token', token)
+      onSuccess()
+    } catch (err: unknown) {
+      setError((err as Error).message || 'Erro de autenticação')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, backgroundColor: 'var(--bg)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      zIndex: 100, fontFamily: 'Courier New, monospace',
+    }}>
+      <div style={{
+        backgroundColor: 'var(--bg-card)',
+        border: '1px solid var(--border)',
+        boxShadow: 'var(--glow-sm)',
+        padding: '32px 40px', maxWidth: '400px', width: '90%',
+      }}>
+        <pre style={{ color: '#00ff00', fontSize: '11px', margin: '0 0 24px', lineHeight: '1.5' }}>{
+`  ██████╗ ██████╗  ██████╗
+  ██╔══██╗██╔══██╗██╔════╝
+  ██████╔╝██████╔╝██║  ███╗
+  ██╔═══╝ ██╔══██╗██║   ██║
+  ██║     ██║  ██║╚██████╔╝
+  ╚═╝     ╚═╝  ╚═╝ ╚═════╝
+  prodbygrillo :: acesso`
+        }</pre>
+
+        <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div>
+            <p style={{ color: '#555', fontSize: '10px', margin: '0 0 4px', letterSpacing: '1px' }}>&gt; UTILIZADOR</p>
+            <input
+              type="text"
+              value={username}
+              onChange={e => setUsername(e.target.value)}
+              autoFocus
+              autoComplete="username"
+              style={{
+                width: '100%', boxSizing: 'border-box',
+                backgroundColor: '#0a0a0a', border: '1px solid var(--border)',
+                color: '#00ff00', fontFamily: 'Courier New, monospace',
+                fontSize: '13px', padding: '8px 10px', outline: 'none',
+              }}
+            />
+          </div>
+          <div>
+            <p style={{ color: '#555', fontSize: '10px', margin: '0 0 4px', letterSpacing: '1px' }}>&gt; PASSWORD</p>
+            <input
+              type="password"
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              autoComplete="current-password"
+              style={{
+                width: '100%', boxSizing: 'border-box',
+                backgroundColor: '#0a0a0a', border: '1px solid var(--border)',
+                color: '#00ff00', fontFamily: 'Courier New, monospace',
+                fontSize: '13px', padding: '8px 10px', outline: 'none',
+              }}
+            />
+          </div>
+
+          {error && (
+            <p style={{ color: '#ff4444', fontSize: '11px', margin: 0 }}>&gt; {error}</p>
+          )}
+
+          <button
+            type="submit"
+            disabled={loading || !username || !password}
+            style={{
+              marginTop: 4,
+              width: '100%', padding: '10px',
+              backgroundColor: loading ? '#003300' : '#00ff00',
+              color: '#000', border: 'none',
+              cursor: loading || !username || !password ? 'not-allowed' : 'pointer',
+              fontSize: '13px', fontFamily: 'Courier New, monospace',
+              fontWeight: 'bold', letterSpacing: '1px',
+              borderTop: '2px solid #00ff00', borderLeft: '2px solid #00ff00',
+              borderRight: '2px solid #007700', borderBottom: '2px solid #007700',
+              opacity: !username || !password ? 0.5 : 1,
+            }}
+          >
+            {loading ? '[ A VERIFICAR... ]' : '[ ENTRAR ]'}
+          </button>
+        </form>
+      </div>
+    </div>
+  )
+}
+
 // ─── Auth overlay ──────────────────────────────────────────────────────────────
 function AuthOverlay({ serverDown = false }: { serverDown?: boolean }) {
   const [loading, setLoading] = useState(false)
@@ -117,7 +222,11 @@ export default function App() {
   const [schedulerPreset, setSchedulerPreset]   = useState<string | undefined>(undefined)
   const [marketContext, setMarketContext]         = useState<MarketContext | undefined>(undefined)
 
-  // Auth
+  // Dashboard login (username/password layer)
+  const [dashboardAuthed, setDashboardAuthed]   = useState(false)
+  const [dashboardChecked, setDashboardChecked] = useState(false)
+
+  // Auth (YouTube OAuth)
   const [authChecked, setAuthChecked]           = useState(false)
   const [authenticated, setAuthenticated]       = useState(false)
   const [serverDown, setServerDown]             = useState(false)
@@ -136,6 +245,19 @@ export default function App() {
   const [revenueMonthly, setRevenueMonthly]     = useState<MonthlyRevenue[] | null>(null)
   const [revenueIncluded, setRevenueIncluded]   = useState<boolean | null>(null)
 
+  // Verify dashboard token on load
+  useEffect(() => {
+    const token = localStorage.getItem('dashboard_token')
+    if (!token) { setDashboardChecked(true); return }
+    api.dashboard.verify()
+      .then(() => { setDashboardAuthed(true) })
+      .catch(() => {
+        localStorage.removeItem('dashboard_token')
+        setDashboardAuthed(false)
+      })
+      .finally(() => setDashboardChecked(true))
+  }, [])
+
   // Check auth on load + listen for redirect
   const checkAuth = useCallback(async () => {
     try {
@@ -152,6 +274,7 @@ export default function App() {
   }, [])
 
   useEffect(() => {
+    if (!dashboardAuthed) return
     checkAuth()
 
     const params = new URLSearchParams(window.location.search)
@@ -167,7 +290,7 @@ export default function App() {
       } catch { /* server not ready */ }
     }, 2000)
     return () => clearInterval(interval)
-  }, [checkAuth])
+  }, [dashboardAuthed, checkAuth])
 
   // Fetch channel info once authenticated
   useEffect(() => {
@@ -210,6 +333,8 @@ export default function App() {
 
   const metricsData = analyticsData ?? []
 
+  if (!dashboardChecked) return <LoadingBar label="> A VERIFICAR ACESSO..." />
+  if (!dashboardAuthed)  return <LoginOverlay onSuccess={() => setDashboardAuthed(true)} />
   if (!authChecked) return <LoadingBar label="> CONNECTING TO SERVER..." />
   if (serverDown)   return <AuthOverlay serverDown />
   if (!authenticated) return <AuthOverlay />
@@ -258,6 +383,8 @@ export default function App() {
           setAuthenticated(false)
           setAnalyticsData(null)
           setChannelInfo(null)
+          api.dashboard.logout()
+          setDashboardAuthed(false)
         }} />
     }
   }

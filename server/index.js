@@ -7,7 +7,7 @@ console.log('[SERVER] Node:', process.version, '| PORT env:', process.env.PORT)
 
 let authRoutes, accountsRoutes, channelRoutes, analyticsRoutes,
     videosRoutes, audienceRoutes, trendingRoutes, aiRoutes, uploadRoutes,
-    instagramRoutes, beatstarsRoutes, accountManager
+    instagramRoutes, beatstarsRoutes, accountManager, dashboardAuth
 
 try {
   authRoutes      = require('./routes/auth')
@@ -22,7 +22,8 @@ try {
   instagramRoutes  = require('./routes/instagram')
   beatstarsRoutes  = require('./routes/beatstars')
   marketRoutes     = require('./routes/market')
-  accountManager   = require('./accountManager')
+  accountManager   = require('./accountManager');
+  ({ dashboardAuth } = require('./middleware/dashboardAuth'))
   console.log('[SERVER] All modules loaded OK')
 } catch (err) {
   console.error('[SERVER] Module load error:', err.message)
@@ -52,6 +53,7 @@ app.use(cors({
   credentials: true,
 }))
 app.use(express.json())
+app.use(dashboardAuth)
 
 function requireAuth(req, res, next) {
   if (!accountManager.isAuthenticated()) {
