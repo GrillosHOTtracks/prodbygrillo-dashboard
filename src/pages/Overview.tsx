@@ -283,8 +283,8 @@ function ArtistHub({ artists }: { artists: ArtistTrend[] }) {
       {tab === 'oportunidades' && (
         <div>
           <p style={{ color: 'var(--text-faint)', fontSize: '10px', marginBottom: '14px', letterSpacing: '1px', lineHeight: '1.6' }}>
-            Artistas com muitos fãs mas poucos type beats no YouTube = mercado inexplorado = menos concorrência = mais fácil de rankear.<br/>
-            <span style={{ color: 'var(--text-faint)', fontSize: '9px' }}>Fórmula: (fãs Deezer / 1M) × 15 ÷ √(n° beats + 1)</span>
+            Artistas com muitos fãs mas poucos type beats = mercado inexplorado = menos concorrência = mais fácil de rankear.<br/>
+            <span style={{ color: 'var(--text-faint)', fontSize: '9px' }}>Score: fãs (Deezer+Spotify) ÷ √(beats+recentes×2) + tendência Google</span>
           </p>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '10px' }}>
             {topOpp.slice(0, 8).map((a, i) => {
@@ -300,8 +300,11 @@ function ArtistHub({ artists }: { artists: ArtistTrend[] }) {
                         <span style={{ color: 'var(--text-bright)', fontWeight: 'bold', fontSize: '13px' }}>{a.name}</span>
                         {i === 0 && <span style={{ fontSize: '9px', color: '#aaff00', padding: '1px 5px', border: '1px solid #aaff0033' }}>💎 TOP OPP</span>}
                       </div>
-                      {a.deezerFans ? <p style={{ color: 'var(--text-faint)', fontSize: '10px', margin: '2px 0 0' }}>{fmtNum(a.deezerFans)} fãs · {a.beatCount} type beats/mês</p>
-                        : <p style={{ color: 'var(--text-faint)', fontSize: '10px', margin: '2px 0 0' }}>{a.beatCount} type beats este mês</p>}
+                      <p style={{ color: 'var(--text-faint)', fontSize: '10px', margin: '2px 0 0' }}>
+                        {a.deezerFans ? `${fmtNum(a.deezerFans)} fãs Deezer` : ''}
+                        {a.spotifyFollowers ? `${a.deezerFans ? ' · ' : ''}${fmtNum(a.spotifyFollowers)} Spotify` : ''}
+                        {!a.deezerFans && !a.spotifyFollowers ? `${a.beatCount} type beats` : ''}
+                      </p>
                     </div>
                   </div>
 
@@ -316,6 +319,25 @@ function ArtistHub({ artists }: { artists: ArtistTrend[] }) {
                     <p style={{ fontSize: '9px', letterSpacing: '-0.5px', color: 'var(--text-faint)', margin: '2px 0 0' }}>
                       {'█'.repeat(filled)}{'░'.repeat(16 - filled)}
                     </p>
+                  </div>
+
+                  {/* Signal row: Trends · Recentes · Spotify pop */}
+                  <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                    {a.trendsScore != null && (
+                      <span style={{ fontSize: '9px', padding: '1px 6px', border: `1px solid ${a.trendsScore >= 60 ? '#00ff0044' : '#ffffff22'}`, color: a.trendsScore >= 60 ? '#00ff00' : 'var(--text-faint)', letterSpacing: '0.5px' }}>
+                        📈 TRENDS {a.trendsScore}/100
+                      </span>
+                    )}
+                    {(a.recentBeatsCount ?? 0) > 0 && (
+                      <span style={{ fontSize: '9px', padding: '1px 6px', border: '1px solid #ff660033', color: '#ff6600', letterSpacing: '0.5px' }}>
+                        ⚡ {a.recentBeatsCount} RECENTES/30d
+                      </span>
+                    )}
+                    {(a.spotifyPopularity ?? 0) > 0 && (
+                      <span style={{ fontSize: '9px', padding: '1px 6px', border: '1px solid #1DB95433', color: '#1DB954', letterSpacing: '0.5px' }}>
+                        ♫ POP {a.spotifyPopularity}/100
+                      </span>
+                    )}
                   </div>
 
                   {a.vibes && a.vibes.length > 0 && (

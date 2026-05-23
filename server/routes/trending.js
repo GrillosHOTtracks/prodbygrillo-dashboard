@@ -68,6 +68,79 @@ function extractVibes(titles) {
     .map(([v]) => v)
 }
 
+// ─── Spotify enrichment — anonymous web-player token, no key ─────────────────
+
+let _spotifyToken = null
+let _spotifyTokenExp = 0
+
+async function getSpotifyToken() {
+  if (_spotifyToken && Date.now() < _spotifyTokenExp) return _spotifyToken
+  const r = await fetch('https://open.spotify.com/get_access_token?reason=transport&productType=web_player', {
+    headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json' },
+    signal: AbortSignal.timeout(6000),
+  })
+  if (!r.ok) return null
+  const data = await r.json()
+  if (!data.accessToken) return null
+  _spotifyToken = data.accessToken
+  _spotifyTokenExp = data.accessTokenExpirationTimestampMs - 30000
+  return _spotifyToken
+}
+
+async function fetchSpotify(artistName) {
+  try {
+    const token = await getSpotifyToken()
+    if (!token) return null
+    const r = await fetch(
+      `https://api.spotify.com/v1/search?q=${encodeURIComponent(artistName)}&type=artist&limit=1`,
+      { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(5000) }
+    )
+    if (!r.ok) return null
+    const data = await r.json()
+    const hit = data?.artists?.items?.[0]
+    if (!hit) return null
+    const nameLow = artistName.toLowerCase()
+    const hitLow  = (hit.name || '').toLowerCase()
+    if (!hitLow.includes(nameLow.split(' ')[0]) && !nameLow.includes(hitLow.split(' ')[0])) return null
+    return { spotifyFollowers: hit.followers?.total || 0, spotifyPopularity: hit.popularity || 0 }
+  } catch { return null }
+}
+
+// ─── Google Trends enrichment — unofficial, no key ───────────────────────────
+
+async function fetchGoogleTrends(keyword) {
+  try {
+    const req = JSON.stringify({
+      comparisonItem: [{ keyword: `${keyword} type beat`, geo: '', time: 'today 3-m' }],
+      category: 0, property: 'youtube',
+    })
+    const exploreUrl = `https://trends.google.com/trends/api/explore?hl=en-US&tz=300&req=${encodeURIComponent(req)}`
+    const exploreRes = await fetch(exploreUrl, {
+      headers: { 'User-Agent': 'Mozilla/5.0', 'Accept-Language': 'en-US' },
+      signal: AbortSignal.timeout(10000),
+    })
+    if (!exploreRes.ok) return null
+    const exploreText = await exploreRes.text()
+    const exploreJson = JSON.parse(exploreText.replace(/^\)\]\}'/, ''))
+    const tsWidget = (exploreJson.widgets || []).find(w => w.id === 'TIMESERIES')
+    if (!tsWidget?.token) return null
+
+    const dataUrl = `https://trends.google.com/trends/api/widgetdata/multiline?hl=en-US&tz=300&req=${encodeURIComponent(JSON.stringify(tsWidget.request))}&token=${encodeURIComponent(tsWidget.token)}`
+    const dataRes = await fetch(dataUrl, {
+      headers: { 'User-Agent': 'Mozilla/5.0', 'Accept-Language': 'en-US' },
+      signal: AbortSignal.timeout(10000),
+    })
+    if (!dataRes.ok) return null
+    const dataJson = JSON.parse((await dataRes.text()).replace(/^\)\]\}'/, ''))
+    const timeline = dataJson?.default?.timelineData || []
+    if (!timeline.length) return null
+
+    // Average of last 4 data points (≈ last month)
+    const recent = timeline.slice(-4).map(d => d.value?.[0] || 0)
+    return Math.round(recent.reduce((a, b) => a + b, 0) / recent.length)
+  } catch { return null }
+}
+
 // ─── Deezer enrichment ────────────────────────────────────────────────────────
 
 async function fetchDeezer(artistName) {
@@ -123,29 +196,36 @@ function getBeatIdea(vibes) {
 // ─── Scoring ──────────────────────────────────────────────────────────────────
 
 function computeScores(artists) {
-  // Normalize demandScore 0-100 based on avgViews
   const maxAvg = Math.max(...artists.map(a => a.avgViews), 1)
   return artists.map(a => {
-    const demandScore = Math.round(
-      (a.beatCount / 3) * 25 + (a.avgViews / maxAvg) * 75
-    )
-    const saturation =
-      a.beatCount <= 4  ? 'low' :
-      a.beatCount <= 14 ? 'medium' : 'high'
+    const demandScore = Math.round((a.beatCount / 3) * 25 + (a.avgViews / maxAvg) * 75)
+    const saturation  = a.beatCount <= 4 ? 'low' : a.beatCount <= 14 ? 'medium' : 'high'
 
-    // opportunityScore: high deezer fans + low beat demand = big opportunity
-    const fans = a.deezerFans || 0
-    const fansMil = fans / 1e6
-    const oppRaw = fansMil > 0
-      ? Math.round(fansMil * 15 / Math.sqrt(a.beatCount + 1) + 20)
-      : Math.max(0, 60 - a.beatCount * 4)
+    // Popularity signal: Deezer fans + Spotify followers blended
+    const deezerMil  = (a.deezerFans || 0) / 1e6
+    const spotMil    = (a.spotifyFollowers || 0) / 1e6
+    const popularityMil = deezerMil > 0 && spotMil > 0
+      ? deezerMil * 0.5 + spotMil * 0.5
+      : Math.max(deezerMil, spotMil, (a.spotifyPopularity || 0) / 50)
+
+    // Penalise recent saturation: beats in last 30 days count double
+    const recentW = (a.recentBeatsCount || 0)
+    const adjBeatCount = a.beatCount + recentW
+
+    // Trends boost: Google Trends score 0-100 adds up to +15 pts
+    const trendsBoost = a.trendsScore != null ? Math.round((a.trendsScore / 100) * 15) : 0
+
+    const oppRaw = popularityMil > 0
+      ? Math.round(popularityMil * 15 / Math.sqrt(adjBeatCount + 1) + trendsBoost + 20)
+      : Math.max(0, 60 - adjBeatCount * 4 + trendsBoost)
     const opportunityScore = Math.min(100, Math.max(0, oppRaw))
 
+    const fans = a.deezerFans || 0
     let hotTag = null
-    if (demandScore >= 85)                 hotTag = '🔥 VIRAL'
-    else if (fans > 5e6 && oppRaw >= 60)  hotTag = '💎 OPORTUNIDADE'
-    else if (a.beatCount <= 4)            hotTag = '⬆ SUBINDO'
-    else if (saturation === 'high')       hotTag = '⚠ SATURADO'
+    if (demandScore >= 85)                         hotTag = '🔥 VIRAL'
+    else if (popularityMil >= 5 && oppRaw >= 60)  hotTag = '💎 OPORTUNIDADE'
+    else if (a.beatCount <= 4)                    hotTag = '⬆ SUBINDO'
+    else if (saturation === 'high')               hotTag = '⚠ SATURADO'
 
     return { ...a, demandScore: Math.min(100, demandScore), saturation, opportunityScore, hotTag }
   })
@@ -197,12 +277,18 @@ router.get('/', async (req, res) => {
       if (!artist) continue
       const key = artistKey(artist)
       if (!artistMap[key]) {
-        artistMap[key] = { name: artist, beatCount: 0, totalViews: 0, avgViews: 0, latestBeat: '', titles: [], photo: null, deezerFans: 0, deezerLink: null }
+        artistMap[key] = { name: artist, beatCount: 0, totalViews: 0, avgViews: 0, latestBeat: '', titles: [], photo: null, deezerFans: 0, deezerLink: null, recentBeatsCount: 0, newestDaysAgo: null }
       }
       artistMap[key].beatCount++
       artistMap[key].totalViews += item.views
       artistMap[key].titles.push(decodeHtml(item.title))
       if (!artistMap[key].latestBeat) artistMap[key].latestBeat = decodeHtml(item.title)
+      if (item.daysAgo !== null && item.daysAgo !== undefined) {
+        if (item.daysAgo <= 30) artistMap[key].recentBeatsCount++
+        if (artistMap[key].newestDaysAgo === null || item.daysAgo < artistMap[key].newestDaysAgo) {
+          artistMap[key].newestDaysAgo = item.daysAgo
+        }
+      }
     }
 
     // Compute avgViews + vibes, take top 15
@@ -216,10 +302,23 @@ router.get('/', async (req, res) => {
       .sort((a, b) => b.totalViews - a.totalViews)
       .slice(0, 15)
 
-    // Deezer enrichment — parallel, 4s timeout each, non-blocking
+    // Deezer enrichment — parallel, 4s timeout each
     await Promise.all(sorted.map(async (a) => {
       const dz = await fetchDeezer(a.name)
       if (dz) { a.photo = dz.photo; a.deezerFans = dz.deezerFans; a.deezerLink = dz.deezerLink }
+    }))
+
+    // Spotify + Google Trends — top 8 only to avoid rate limits
+    const top8 = sorted.slice(0, 8)
+    await Promise.all(top8.map(async (a, i) => {
+      // Small stagger to avoid bursting Google Trends
+      if (i > 0) await new Promise(r => setTimeout(r, i * 600))
+      const [sp, gt] = await Promise.allSettled([fetchSpotify(a.name), fetchGoogleTrends(a.name)])
+      if (sp.status === 'fulfilled' && sp.value) {
+        a.spotifyFollowers  = sp.value.spotifyFollowers
+        a.spotifyPopularity = sp.value.spotifyPopularity
+      }
+      if (gt.status === 'fulfilled' && gt.value !== null) a.trendsScore = gt.value
     }))
 
     // Add beatIdea + scores, strip internal titles array

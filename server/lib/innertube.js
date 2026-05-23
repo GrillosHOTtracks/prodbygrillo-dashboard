@@ -41,6 +41,16 @@ function parseViews(text) {
   return Math.round(n * mult)
 }
 
+// Parse "2 days ago", "3 weeks ago", "1 month ago" → days (integer) or null
+function parseDaysAgo(text) {
+  if (!text) return null
+  const m = text.toLowerCase().match(/(\d+)\s+(second|minute|hour|day|week|month|year)s?\s+ago/)
+  if (!m) return null
+  const n = parseInt(m[1])
+  const mult = { second: 0, minute: 0, hour: 0, day: 1, week: 7, month: 30, year: 365 }
+  return n * (mult[m[2]] ?? 1)
+}
+
 // Extract all videoRenderer items from Innertube search response
 function extractSearchVideos(data) {
   const videos = []
@@ -54,8 +64,9 @@ function extractSearchVideos(data) {
       const v = item?.videoRenderer
       if (!v?.videoId) continue
       const title = v.title?.runs?.map(r => r.text).join('') ?? ''
-      const vcRaw = v.viewCountText?.simpleText ?? v.viewCountText?.runs?.[0]?.text ?? '0'
-      videos.push({ videoId: v.videoId, title, views: parseViews(vcRaw) })
+      const vcRaw  = v.viewCountText?.simpleText ?? v.viewCountText?.runs?.[0]?.text ?? '0'
+      const pubRaw = v.publishedTimeText?.simpleText ?? ''
+      videos.push({ videoId: v.videoId, title, views: parseViews(vcRaw), daysAgo: parseDaysAgo(pubRaw) })
     }
   }
   return videos

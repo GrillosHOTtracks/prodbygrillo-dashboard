@@ -51,11 +51,17 @@ export type ArtistTrend = {
   deezerFans?:      number
   deezerLink?:      string | null
   vibes?:           string[]
-  demandScore?:     number
-  saturation?:      'low' | 'medium' | 'high'
-  opportunityScore?:number
-  hotTag?:          string | null
-  beatIdea?:        BeatIdea
+  demandScore?:       number
+  saturation?:        'low' | 'medium' | 'high'
+  opportunityScore?:  number
+  hotTag?:            string | null
+  beatIdea?:          BeatIdea
+  // New enrichment fields
+  spotifyFollowers?:  number
+  spotifyPopularity?: number
+  trendsScore?:       number | null
+  recentBeatsCount?:  number
+  newestDaysAgo?:     number | null
 }
 
 export type OAuthStatus = {
