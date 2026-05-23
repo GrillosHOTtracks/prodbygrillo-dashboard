@@ -25,11 +25,12 @@ router.post('/publish', upload.single('audio'), async (req, res) => {
     const meta = JSON.parse(req.body.meta || '{}')
     const { title, description, tags, bpm, key, genre, mood, thumbnail } = meta
 
-    const email    = process.env.BEATSTARS_EMAIL
-    const password = process.env.BEATSTARS_PASSWORD
+    const email          = process.env.BEATSTARS_EMAIL
+    const password       = process.env.BEATSTARS_PASSWORD
+    const cookiesB64     = process.env.BEATSTARS_COOKIES
 
-    if (!email || !password) {
-      sse(res, { status: 'ERROR', error: 'BEATSTARS_EMAIL e BEATSTARS_PASSWORD não configurados no Railway' })
+    if (!cookiesB64 && (!email || !password)) {
+      sse(res, { status: 'ERROR', error: 'Configure BEATSTARS_COOKIES (preferido) ou BEATSTARS_EMAIL + BEATSTARS_PASSWORD no Railway' })
       res.write('data: [DONE]\n\n')
       return res.end()
     }
@@ -46,7 +47,9 @@ router.post('/publish', upload.single('audio'), async (req, res) => {
 
     sse(res, { status: 'LAUNCHING', message: 'Iniciando navegador...' })
 
-    const puppeteer = require('puppeteer')
+    const puppeteer = require('puppeteer-extra')
+    const StealthPlugin = require('puppeteer-extra-plugin-stealth')
+    puppeteer.use(StealthPlugin())
     browser = await puppeteer.launch({
       headless: 'new',
       executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || process.env.CHROME_BIN || '/usr/bin/chromium-browser',
@@ -64,58 +67,75 @@ router.post('/publish', upload.single('audio'), async (req, res) => {
 
     // ── Login ────────────────────────────────────────────────────────────────────
     sse(res, { status: 'LOGGING_IN', message: 'Fazendo login no BeatStars...' })
-    await page.goto('https://www.beatstars.com/login', { waitUntil: 'networkidle2' })
-    await new Promise(r => setTimeout(r, 1500))
 
-    // Accept cookies
-    try {
-      await page.waitForSelector('#onetrust-accept-btn-handler', { timeout: 4000 })
-      await page.click('#onetrust-accept-btn-handler')
-    } catch {}
+    if (cookiesB64) {
+      // Restore saved session cookies — bypasses login and MFA entirely
+      const cookies = JSON.parse(Buffer.from(cookiesB64, 'base64').toString('utf8'))
+      // Must navigate first so cookies can be set on correct origin
+      await page.goto('https://www.beatstars.com/', { waitUntil: 'domcontentloaded' })
+      await page.setCookie(...cookies)
+      console.log('[BEATSTARS] Session cookies restored:', cookies.length)
+    } else {
+      // Fallback: full login flow (only works if MFA is not triggered)
+      await page.goto('https://www.beatstars.com/login', { waitUntil: 'networkidle2' })
+      await new Promise(r => setTimeout(r, 1500))
 
-    // Email — AngularJS requires keyboard.type() to trigger $watch
-    await page.waitForSelector('#oath-email', { timeout: 10000 })
-    await page.click('#oath-email', { clickCount: 3 })
-    await page.keyboard.type(email, { delay: 40 })
-    await new Promise(r => setTimeout(r, 500))
+      try {
+        await page.waitForSelector('#onetrust-accept-btn-handler', { timeout: 4000 })
+        await page.click('#onetrust-accept-btn-handler')
+      } catch {}
 
-    // Click Continue (Enter alone doesn't advance the email step on BeatStars)
-    await page.evaluate(() => {
-      const btn = document.querySelector('button[type="submit"]') ||
-                  Array.from(document.querySelectorAll('button')).find(b =>
-                    /continuar|continue|next/i.test(b.textContent || ''))
-      if (btn) btn.click()
-    })
-    await new Promise(r => setTimeout(r, 1000))
+      await page.waitForSelector('#oath-email', { timeout: 10000 })
+      await page.click('#oath-email', { clickCount: 3 })
+      await page.keyboard.type(email, { delay: 40 })
+      await new Promise(r => setTimeout(r, 600))
 
-    // Wait for password field — confirmed ID: #userPassword
-    await page.waitForSelector('#userPassword', { timeout: 15000 })
-    await new Promise(r => setTimeout(r, 500))
+      const continueHandle = await page.evaluateHandle(() =>
+        document.querySelector('button[type="submit"]') ||
+        Array.from(document.querySelectorAll('button')).find(b =>
+          /continuar|continue|next/i.test(b.textContent || ''))
+      )
+      const continueEl = continueHandle.asElement()
+      if (continueEl) { await continueEl.click() } else { await page.keyboard.press('Enter') }
+      await new Promise(r => setTimeout(r, 1500))
 
-    // Password — keyboard.type() so AngularJS $watch fires
-    await page.click('#userPassword', { clickCount: 3 })
-    await page.keyboard.type(password, { delay: 40 })
-    await new Promise(r => setTimeout(r, 400))
+      await page.waitForFunction(() =>
+        !!(document.querySelector('#userPassword') ||
+           document.querySelector('input[type="password"]') ||
+           document.querySelector('input[name="password"]'))
+      , { timeout: 15000 })
+      await new Promise(r => setTimeout(r, 500))
 
-    // Submit password
-    await Promise.all([
-      page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {}),
-      page.evaluate(() => {
-        const btn = document.querySelector('button[type="submit"]') ||
-                    Array.from(document.querySelectorAll('button')).find(b =>
-                      /continuar|continue|entrar|login|sign/i.test(b.textContent || ''))
-        if (btn) btn.click()
-        else document.querySelector('#userPassword')?.closest('form')?.submit()
-      }),
-    ])
-    await new Promise(r => setTimeout(r, 2500))
+      const pwHandle = await page.evaluateHandle(() =>
+        document.querySelector('#userPassword') ||
+        document.querySelector('input[type="password"]') ||
+        document.querySelector('input[name="password"]')
+      )
+      const pwEl = pwHandle.asElement()
+      if (!pwEl) throw new Error('Campo de senha não encontrado após passo de email')
+      await pwEl.click({ clickCount: 3 })
+      await page.keyboard.type(password, { delay: 40 })
+      await new Promise(r => setTimeout(r, 400))
 
-    const afterLoginUrl = page.url()
-    console.log('[BEATSTARS] URL after login:', afterLoginUrl)
-    if (afterLoginUrl.includes('/login') || afterLoginUrl.includes('/signin')) {
-      sse(res, { status: 'ERROR', error: 'Login falhou — credenciais incorretas ou BeatStars bloqueou o acesso' })
-      res.write('data: [DONE]\n\n')
-      return res.end()
+      const submitHandle = await page.evaluateHandle(() =>
+        document.querySelector('button[type="submit"]') ||
+        Array.from(document.querySelectorAll('button')).find(b =>
+          /continuar|continue|entrar|login|sign/i.test(b.textContent || ''))
+      )
+      const submitEl = submitHandle.asElement()
+      await Promise.all([
+        page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {}),
+        submitEl ? submitEl.click() : page.keyboard.press('Enter'),
+      ])
+      await new Promise(r => setTimeout(r, 2500))
+
+      const afterLoginUrl = page.url()
+      console.log('[BEATSTARS] URL after login:', afterLoginUrl)
+      if (afterLoginUrl.includes('/login') || afterLoginUrl.includes('/signin')) {
+        sse(res, { status: 'ERROR', error: 'Login falhou — use BEATSTARS_COOKIES (rode setup-beatstars-session.cjs)' })
+        res.write('data: [DONE]\n\n')
+        return res.end()
+      }
     }
 
     // ── Navigate to Studio Tracks ────────────────────────────────────────────────
