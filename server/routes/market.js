@@ -169,6 +169,29 @@ function parseViews(text) {
   return Math.round(parseFloat(m[1]) * mult)
 }
 
+function parseDurationSec(text) {
+  if (!text) return 0
+  const parts = text.split(':').map(Number)
+  if (parts.length === 2) return parts[0] * 60 + parts[1]
+  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2]
+  return 0
+}
+
+function parseDaysAgo(text) {
+  if (!text) return null
+  const m = text.match(/(\d+)\s*(hour|day|week|month|year)/i)
+  if (!m) return null
+  const n = parseInt(m[1])
+  switch (m[2].toLowerCase()) {
+    case 'hour':  return Math.max(1, Math.round(n / 24))
+    case 'day':   return n
+    case 'week':  return n * 7
+    case 'month': return n * 30
+    case 'year':  return n * 365
+    default:      return null
+  }
+}
+
 const YT_HEADERS = {
   'Content-Type': 'application/json',
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
@@ -196,10 +219,14 @@ async function searchYT(query, gl, hl = 'en') {
       for (const item of (sec?.itemSectionRenderer?.contents ?? [])) {
         const v = item?.videoRenderer
         if (!v?.videoId) continue
-        const title   = v.title?.runs?.map(r => r.text).join('') || ''
-        const channel = v.ownerText?.runs?.[0]?.text || v.longBylineText?.runs?.[0]?.text || ''
-        const vcRaw   = v.viewCountText?.simpleText ?? v.viewCountText?.runs?.[0]?.text ?? ''
-        const obj = { title, channel, views: parseViews(vcRaw), videoId: v.videoId }
+        const title       = v.title?.runs?.map(r => r.text).join('') || ''
+        const channel     = v.ownerText?.runs?.[0]?.text || v.longBylineText?.runs?.[0]?.text || ''
+        const channelId   = v.ownerText?.runs?.[0]?.navigationEndpoint?.browseEndpoint?.browseId
+          || v.longBylineText?.runs?.[0]?.navigationEndpoint?.browseEndpoint?.browseId || null
+        const vcRaw       = v.viewCountText?.simpleText ?? v.viewCountText?.runs?.[0]?.text ?? ''
+        const durationSec = parseDurationSec(v.lengthText?.simpleText || '')
+        const publishedAgo = v.publishedTimeText?.simpleText || null
+        const obj = { title, channel, channelId, views: parseViews(vcRaw), videoId: v.videoId, durationSec, publishedAgo }
         if (!isJunk(obj)) items.push(obj)
       }
     }
@@ -300,9 +327,9 @@ function aggregateResults(results) {
       nacc.total += items.length
       nacc.byMarket[gl] = (nacc.byMarket[gl] || 0) + items.length
       const mkt = MARKET_MAP[gl] || MARKETS[0]
-      for (const { title, channel, views, videoId } of items) {
+      for (const { title, channel, channelId, views, videoId, durationSec, publishedAgo } of items) {
         if (channel) nacc.artists.add(channel)
-        nacc.sampleRaw.push({ title, channel, views, videoId, flag: mkt.flag, market: mkt.label })
+        nacc.sampleRaw.push({ title, channel, channelId, views, videoId, durationSec, publishedAgo, flag: mkt.flag, market: mkt.label })
         macc.total++
         macc.byNiche[nicheId] = (macc.byNiche[nicheId] || 0) + 1
         if (channel) macc.artists.add(channel)
@@ -353,9 +380,46 @@ function aggregateResults(results) {
     .slice(0, 15)
     .map(([artist]) => artist)
 
+  // ── Benchmarks por canal ─────────────────────────────────────────────────────
+  // Agrega todos os vídeos de todas as amostras de nicho por channelId
+  const channelMap = new Map() // channelId → { name, videos: [{views,durationSec,daysAgo,nicheId}] }
+  for (const n of NICHES) {
+    const acc = nicheAcc[n.id]
+    for (const v of acc.sampleRaw) {
+      if (!v.channelId || !v.channel) continue
+      if (!channelMap.has(v.channelId)) channelMap.set(v.channelId, { name: v.channel, videos: [] })
+      const daysAgo = parseDaysAgo(v.publishedAgo)
+      channelMap.get(v.channelId).videos.push({ views: v.views, durationSec: v.durationSec, daysAgo, nicheId: n.id })
+    }
+  }
+
+  const channels = [...channelMap.entries()]
+    .map(([channelId, { name, videos }]) => {
+      const avgViews   = Math.round(videos.reduce((s, v) => s + v.views, 0) / videos.length)
+      const durations  = videos.map(v => v.durationSec).filter(d => d > 0)
+      const avgDurSec  = durations.length ? Math.round(durations.reduce((s, d) => s + d, 0) / durations.length) : 0
+      const daysArr    = videos.map(v => v.daysAgo).filter(d => d !== null).sort((a, b) => a - b)
+      let postFreqDays = null
+      if (daysArr.length >= 2) {
+        const gaps = []
+        for (let i = 1; i < daysArr.length; i++) gaps.push(daysArr[i] - daysArr[i - 1])
+        postFreqDays = Math.round(gaps.reduce((s, g) => s + g, 0) / gaps.length)
+      }
+      // top niche for this channel
+      const nicheCount = {}
+      videos.forEach(v => { nicheCount[v.nicheId] = (nicheCount[v.nicheId] || 0) + 1 })
+      const topNicheId = Object.entries(nicheCount).sort((a, b) => b[1] - a[1])[0]?.[0]
+      const topNicheLabel = NICHES.find(n => n.id === topNicheId)?.label || '—'
+      return { channelId, name, videosFound: videos.length, avgViews, avgDurSec, postFreqDays, topNiche: topNicheLabel }
+    })
+    .filter(c => c.videosFound >= 2)    // só canais com 2+ vídeos encontrados
+    .sort((a, b) => b.avgViews - a.avgViews)
+    .slice(0, 20)
+
   return {
     niches,
     markets,
+    channels,
     typeBeat:      { total: [...typeBeatCount.values()].reduce((s, c) => s + c, 0), referenceArtists },
     hottestNiche:  niches[0]?.id || 'trap',
     hottestMarket: markets[0]

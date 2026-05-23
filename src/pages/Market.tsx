@@ -4,12 +4,25 @@ import type { Page } from '../types'
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface VideoItem {
-  title:   string
-  channel: string
-  views:   number
-  flag:    string
-  market:  string
-  videoId?: string
+  title:       string
+  channel:     string
+  channelId?:  string
+  views:       number
+  flag:        string
+  market:      string
+  videoId?:    string
+  durationSec?: number
+  publishedAgo?: string
+}
+
+interface ChannelBenchmark {
+  channelId:    string
+  name:         string
+  videosFound:  number
+  avgViews:     number
+  avgDurSec:    number
+  postFreqDays: number | null
+  topNiche:     string
 }
 
 interface HotMarket { gl: string; flag: string; label: string; count: number }
@@ -55,6 +68,7 @@ interface MarketData {
   updatedAt:    string
   niches:       NicheResult[]
   markets:      MarketResult[]
+  channels:     ChannelBenchmark[]
   typeBeat:     TypeBeatResult
   hottestNiche: string
   hottestMarket: { gl: string; flag: string; label: string }
@@ -630,7 +644,78 @@ function CardLAIS({ data, loading, onSchedule }: { data: LaisData | null; loadin
   )
 }
 
-// ─── Card 3: O QUE O PÚBLICO QUER ────────────────────────────────────────────
+// ─── Card 3: Canais Concorrentes ─────────────────────────────────────────────
+
+function fmtDur(sec: number) {
+  if (!sec) return '—'
+  const m = Math.floor(sec / 60)
+  const s = sec % 60
+  return `${m}:${String(s).padStart(2, '0')}`
+}
+
+function fmtFreq(days: number | null) {
+  if (days === null) return '—'
+  if (days <= 2)   return 'diário'
+  if (days <= 5)   return `~${days}d`
+  if (days <= 14)  return `~${Math.round(days / 7)}sem`
+  if (days <= 60)  return `~${Math.round(days / 30)}mês`
+  return `~${Math.round(days / 30)}meses`
+}
+
+function CardChannels({ channels }: { channels: ChannelBenchmark[] }) {
+  if (!channels.length) return null
+
+  const maxViews = channels[0]?.avgViews || 1
+
+  return (
+    <div style={{ ...card, minHeight: 'unset', gap: '10px' }}>
+      <p style={heading}>┌─ CANAIS CONCORRENTES ─</p>
+      <p style={{ ...lbl, opacity: 0.6 }}>avg views · frequência · duração · nicho dominante</p>
+
+      <div style={{ overflowY: 'auto', maxHeight: 280 }}>
+        {channels.slice(0, 15).map((c, i) => {
+          const barPct = Math.round((c.avgViews / maxViews) * 100)
+          const color  = i === 0 ? 'var(--accent)' : i < 3 ? '#aaff00' : 'var(--text-dim)'
+          return (
+            <div key={c.channelId} style={{ marginBottom: 10 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '14px 1fr auto', gap: '6px', alignItems: 'baseline', marginBottom: 3 }}>
+                <span style={{ color: 'var(--text-faint)', fontSize: '8px', textAlign: 'right' }}>
+                  {String(i + 1).padStart(2, '0')}
+                </span>
+                <div>
+                  <span style={{ color, fontSize: '10px', fontWeight: i < 3 ? 'bold' : 'normal' }}>
+                    {c.name}
+                  </span>
+                  <span style={{ color: 'var(--text-faint)', fontSize: '9px', marginLeft: 6 }}>
+                    {c.topNiche}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', gap: 6, fontSize: '9px', color: 'var(--text-faint)', flexShrink: 0 }}>
+                  <span style={{ color }}>{fmtNum(c.avgViews)}</span>
+                  <span>·</span>
+                  <span>{fmtFreq(c.postFreqDays)}</span>
+                  <span>·</span>
+                  <span>{fmtDur(c.avgDurSec)}</span>
+                </div>
+              </div>
+              <div style={{ height: 2, backgroundColor: 'var(--border)', marginLeft: 20 }}>
+                <div style={{ height: '100%', width: `${barPct}%`, backgroundColor: color, opacity: 0.7, transition: 'width 0.4s' }} />
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      <div style={{ padding: '6px 10px', border: '1px solid var(--border)', backgroundColor: '#050505' }}>
+        <p style={{ ...lbl, margin: 0 }}>
+          {channels.length} canais · {channels.filter(c => c.postFreqDays !== null && c.postFreqDays <= 7).length} postam semanalmente
+        </p>
+      </div>
+    </div>
+  )
+}
+
+// ─── Card 4: O QUE O PÚBLICO QUER ────────────────────────────────────────────
 
 function CardComments({ data, loading }: { data: CommentInsights | null; loading?: boolean }) {
   if (loading && !data) return (
@@ -818,6 +903,7 @@ export function Market({ onNavigate }: { onNavigate?: (page: Page) => void }) {
               loading={laisLoading}
               onSchedule={onNavigate ? (_title) => { onNavigate('scheduler') } : undefined}
             />
+            <CardChannels channels={data.channels ?? []} />
             <CardComments data={commData} loading={commLoading} />
           </div>
         </div>
