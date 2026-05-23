@@ -250,6 +250,10 @@ export function Scheduler({ onNavigate, presetArtist, onPresetConsumed }: { onNa
   const [publishedYt, setPublishedYt] = useState<string | null>(null)
   const [publishedIg, setPublishedIg] = useState<string | null>(null)
 
+  // ── Thumbnail AI prompt (feature 3)
+  const [thumbPrompt, setThumbPrompt]           = useState('')
+  const [thumbPromptLoading, setThumbPromptLoading] = useState(false)
+
   // Load Instagram status
   useEffect(() => {
     fetch('/api/instagram/auth/status').then(r => r.ok ? r.json() : null).then(d => { if (d) setIgStatus(d) }).catch(() => {})
@@ -487,6 +491,42 @@ export function Scheduler({ onNavigate, presetArtist, onPresetConsumed }: { onNa
     } catch {}
   }, [])
 
+  // ── Thumbnail AI prompt generator
+  const generateThumbPrompt = useCallback(async () => {
+    if (!analysis) return
+    setThumbPromptLoading(true)
+    setThumbPrompt('')
+    const artists = analysis.trendingComparison.matchingArtists.slice(0, 3).join(', ')
+    const vibes   = analysis.trendingComparison.vibes.join(', ')
+    const colors  = analysis.thumbnail.colors.join(', ')
+    const msg = `You are a visual art director for music YouTube thumbnails. Generate a detailed Midjourney prompt for a beat named "${beatName}". BPM: ${detectedBpm ?? analysis.bpm ?? '?'}, Key: ${detectedKey ?? analysis.key ?? '?'}, Artists: ${artists}, Vibes: ${vibes}. Thumbnail text: "${analysis.thumbnail.mainText}". Aesthetic: cyberpunk, neon green chrome, dark futuristic, opium trap, metallic surfaces, glowing neon. Colors: ${colors}. Output ONLY the Midjourney prompt, nothing else. End with --ar 16:9 --style raw --q 2`
+    try {
+      const res = await fetch('/api/ai/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: msg }),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const reader  = res.body!.getReader()
+      const decoder = new TextDecoder()
+      let rawBuf = '', full = ''
+      outer: while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        rawBuf += decoder.decode(value, { stream: true })
+        const lines = rawBuf.split('\n')
+        rawBuf = lines.pop() ?? ''
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue
+          const payload = line.slice(6)
+          if (payload === '[DONE]') break outer
+          try { const evt = JSON.parse(payload); if (evt.text) { full += evt.text; setThumbPrompt(full) } } catch {}
+        }
+      }
+    } catch (err: any) { setThumbPrompt(`Erro: ${err.message}`) }
+    finally { setThumbPromptLoading(false) }
+  }, [analysis, beatName, detectedBpm, detectedKey])
+
   // ── Full reset
   function reset() {
     setStep(1); setVideoFile(null); setThumbFile(null); setThumbPreview(null); setBeatName('')
@@ -496,6 +536,7 @@ export function Scheduler({ onNavigate, presetArtist, onPresetConsumed }: { onNa
     setThumbDataUrl(null); setUploadPhase('idle'); setUploadVideoId(null); setUploadError('')
     setIgPhase('idle'); setIgProgress(0); setIgPermalink(''); setIgError('')
     setPublishedYt(null); setPublishedIg(null)
+    setThumbPrompt(''); setThumbPromptLoading(false)
   }
 
   const showResults = aiStatus === 'done' && analysis !== null
@@ -767,6 +808,34 @@ export function Scheduler({ onNavigate, presetArtist, onPresetConsumed }: { onNa
                   onReady={setThumbDataUrl}
                 />
               )}
+
+              {/* Thumbnail AI prompt */}
+              <div style={{ border: '1px solid #1a1a1a', backgroundColor: '#080808', padding: '12px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                  <p style={{ ...dim, margin: 0 }}>THUMBNAIL AI · PROMPT MIDJOURNEY / FLUX</p>
+                  <button
+                    onClick={generateThumbPrompt}
+                    disabled={thumbPromptLoading}
+                    style={{ ...retro, color: thumbPromptLoading ? '#333333' : '#00aa00', border: `1px solid ${thumbPromptLoading ? '#222222' : '#1a3a1a'}`, padding: '4px 12px' }}
+                    onMouseEnter={e => { if (!thumbPromptLoading) { (e.currentTarget as HTMLElement).style.color = '#00ff00'; (e.currentTarget as HTMLElement).style.borderColor = '#00aa00' } }}
+                    onMouseLeave={e => { if (!thumbPromptLoading) { (e.currentTarget as HTMLElement).style.color = '#00aa00'; (e.currentTarget as HTMLElement).style.borderColor = '#1a3a1a' } }}
+                  >
+                    {thumbPromptLoading ? '[ GERANDO... ]' : '[ GERAR THUMBNAIL AI ]'}
+                  </button>
+                </div>
+                {thumbPrompt ? (
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
+                    <pre style={{ flex: 1, color: '#00cc00', fontSize: '10px', lineHeight: '1.6', margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', backgroundColor: '#050505', border: '1px solid #1a3a1a', padding: '8px' }}>
+                      {thumbPrompt}
+                    </pre>
+                    <CopyBtn text={thumbPrompt} />
+                  </div>
+                ) : (
+                  <p style={{ color: '#2a2a2a', fontSize: '10px', margin: 0, letterSpacing: '1px' }}>
+                    Clique para gerar prompt cyberpunk/neon para Midjourney ou Flux
+                  </p>
+                )}
+              </div>
 
               {/* Artistas + vibes */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
