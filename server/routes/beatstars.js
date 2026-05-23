@@ -4,6 +4,10 @@ const os      = require('os')
 const path    = require('path')
 const fs      = require('fs')
 
+const puppeteer = require('puppeteer-extra')
+const StealthPlugin = require('puppeteer-extra-plugin-stealth')
+puppeteer.use(StealthPlugin())
+
 const router  = express.Router()
 const upload  = multer({ dest: os.tmpdir(), limits: { fileSize: 500 * 1024 * 1024, fieldSize: 20 * 1024 * 1024 } })
 
@@ -47,9 +51,6 @@ router.post('/publish', upload.single('audio'), async (req, res) => {
 
     sse(res, { status: 'LAUNCHING', message: 'Iniciando navegador...' })
 
-    const puppeteer = require('puppeteer-extra')
-    const StealthPlugin = require('puppeteer-extra-plugin-stealth')
-    puppeteer.use(StealthPlugin())
     browser = await puppeteer.launch({
       headless: 'new',
       executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || process.env.CHROME_BIN || '/usr/bin/chromium-browser',
@@ -71,10 +72,21 @@ router.post('/publish', upload.single('audio'), async (req, res) => {
     if (cookiesB64) {
       // Restore saved session cookies — bypasses login and MFA entirely
       const cookies = JSON.parse(Buffer.from(cookiesB64, 'base64').toString('utf8'))
-      // Must navigate first so cookies can be set on correct origin
       await page.goto('https://www.beatstars.com/', { waitUntil: 'domcontentloaded' })
       await page.setCookie(...cookies)
       console.log('[BEATSTARS] Session cookies restored:', cookies.length)
+
+      // Verify session is still valid
+      await page.goto('https://www.beatstars.com/', { waitUntil: 'networkidle2' })
+      const sessionOk = await page.evaluate(() => !!(window.__bs_user || document.querySelector('[class*="userAvatar"], [class*="avatar"], [data-user-id]')))
+      if (!sessionOk) {
+        const currentUrl = page.url()
+        if (currentUrl.includes('/login') || currentUrl.includes('oauth.beatstars.com')) {
+          sse(res, { status: 'ERROR', error: 'Sessão BeatStars expirada — rode setup-beatstars-session.cjs e atualize BEATSTARS_COOKIES no Railway' })
+          res.write('data: [DONE]\n\n')
+          return res.end()
+        }
+      }
     } else {
       // Fallback: full login flow (only works if MFA is not triggered)
       await page.goto('https://www.beatstars.com/login', { waitUntil: 'networkidle2' })

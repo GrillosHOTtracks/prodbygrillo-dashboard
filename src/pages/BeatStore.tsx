@@ -437,8 +437,8 @@ export function BeatStore({ onNavigate }: { onNavigate?: (page: Page) => void })
             <div>
               <p style={{ color: '#ff4400', fontSize: '11px', margin: '0 0 10px' }}>⚠ {error}</p>
               <p style={{ color: '#444444', fontSize: '10px', margin: 0, lineHeight: '1.6' }}>
-                Se o erro for de login: verifica BEATSTARS_EMAIL e BEATSTARS_PASSWORD no Railway.<br/>
-                Se for de seletores: os elementos da página do BeatStars podem ter mudado — abre um issue.
+                Se o erro for de sessão expirada: corre setup-beatstars-session.cjs e atualiza BEATSTARS_COOKIES no Railway.<br/>
+                Se for de seletores: os elementos da página do BeatStars podem ter mudado.
               </p>
             </div>
           )}

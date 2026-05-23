@@ -20,12 +20,28 @@ function clearAllCaches() {
 const router = express.Router()
 let pendingFrontendOrigin = 'http://localhost:5173'
 
+const ALLOWED_CALLBACK_ORIGINS = [
+  /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/,
+  process.env.FRONTEND_URL,
+  process.env.RAILWAY_PUBLIC_DOMAIN
+    ? new RegExp('^https://' + process.env.RAILWAY_PUBLIC_DOMAIN.replace(/\./g, '\\.'))
+    : null,
+].filter(Boolean)
+
+function isAllowedOrigin(origin) {
+  return ALLOWED_CALLBACK_ORIGINS.some(p =>
+    typeof p === 'string' ? origin === p : p.test(origin)
+  )
+}
+
 router.get('/status', (_req, res) => {
   res.json({ authenticated: accountManager.isAuthenticated() })
 })
 
 router.get('/url', (req, res) => {
-  if (req.query.origin) pendingFrontendOrigin = req.query.origin
+  if (req.query.origin && isAllowedOrigin(req.query.origin)) {
+    pendingFrontendOrigin = req.query.origin
+  }
   try {
     const url = accountManager.getAuthUrl()
     if (!url) return res.status(400).json({ error: 'No OAuth credentials found' })
