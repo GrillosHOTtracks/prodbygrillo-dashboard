@@ -165,11 +165,13 @@ function CardYouTube({ ytBR, ytUS }: { ytBR: YTData; ytUS: YTData }) {
 function CardBeatStars({ data }: { data: BeatStarsData | null }) {
   if (!data) return (
     <div style={card}>
-      <p style={heading}>┌─ BEATSTARS · PRODBYGRILLO ──────</p>
-      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <p style={heading}>┌─ CATÁLOGO · PRODBYGRILLO ───────</p>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
         <p style={{ color: 'var(--text-faint)', fontSize: '10px', textAlign: 'center', letterSpacing: '1px' }}>
-          DADOS INDISPONÍVEIS<br/>
-          <span style={{ fontSize: '9px', opacity: 0.6 }}>BeatStars usa JS rendering</span>
+          SEM UPLOADS NO SCHEDULER
+        </p>
+        <p style={{ color: 'var(--text-faint)', fontSize: '9px', textAlign: 'center', opacity: 0.6, lineHeight: 1.6 }}>
+          Faz o primeiro upload via Scheduler<br/>para ver o teu catálogo aqui.
         </p>
       </div>
     </div>
@@ -199,17 +201,16 @@ function CardBeatStars({ data }: { data: BeatStarsData | null }) {
   return (
     <div style={card}>
       <div>
-        <p style={heading}>┌─ BEATSTARS · PRODBYGRILLO ──────</p>
+        <p style={heading}>┌─ CATÁLOGO · PRODBYGRILLO ───────</p>
         <div style={{ display: 'flex', gap: '16px' }}>
-          <span style={{ color: 'var(--text-dim)', fontSize: '10px' }}>{data.totalTracks} beats</span>
-          <span style={{ color: 'var(--text-dim)', fontSize: '10px' }}>{fmtNum(data.totalPlays)} plays</span>
-          <span style={{ color: 'var(--text-dim)', fontSize: '10px' }}>{fmtNum(data.totalLikes)} likes</span>
+          <span style={{ color: 'var(--text-dim)', fontSize: '10px' }}>{data.totalTracks} uploads</span>
+          <span style={{ color: 'var(--text-dim)', fontSize: '10px' }}>{fmtNum(data.totalPlays)} views</span>
         </div>
       </div>
 
       <div style={{ display: 'flex', gap: 0, borderBottom: '1px solid var(--border)' }}>
-        {tabBtn('plays', '[ MAIS OUVIDOS ]')}
-        {tabBtn('likes', '[ MAIS CURTIDOS ]')}
+        {tabBtn('plays', '[ MAIS VISTOS ]')}
+        {tabBtn('likes', '[ MAIS RECENTES ]', true)}
         {tabBtn('sales', '[ MAIS VENDIDOS ]', !data.topSold?.length)}
       </div>
 
