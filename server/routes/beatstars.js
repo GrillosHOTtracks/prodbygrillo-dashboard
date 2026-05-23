@@ -77,15 +77,13 @@ router.post('/publish', upload.single('audio'), async (req, res) => {
       console.log('[BEATSTARS] Session cookies restored:', cookies.length)
 
       // Verify session is still valid
-      await page.goto('https://www.beatstars.com/', { waitUntil: 'networkidle2' })
-      const sessionOk = await page.evaluate(() => !!(window.__bs_user || document.querySelector('[class*="userAvatar"], [class*="avatar"], [data-user-id]')))
-      if (!sessionOk) {
-        const currentUrl = page.url()
-        if (currentUrl.includes('/login') || currentUrl.includes('oauth.beatstars.com')) {
-          sse(res, { status: 'ERROR', error: 'Sessão BeatStars expirada — rode setup-beatstars-session.cjs e atualize BEATSTARS_COOKIES no Railway' })
-          res.write('data: [DONE]\n\n')
-          return res.end()
-        }
+      await page.goto('https://www.beatstars.com/', { waitUntil: 'domcontentloaded' })
+      await new Promise(r => setTimeout(r, 2000))
+      const currentUrl = page.url()
+      if (currentUrl.includes('/login') || currentUrl.includes('oauth.beatstars.com')) {
+        sse(res, { status: 'ERROR', error: 'Sessão BeatStars expirada — rode setup-beatstars-session.cjs e atualize BEATSTARS_COOKIES no Railway' })
+        res.write('data: [DONE]\n\n')
+        return res.end()
       }
     } else {
       // Fallback: full login flow (only works if MFA is not triggered)
@@ -152,8 +150,13 @@ router.post('/publish', upload.single('audio'), async (req, res) => {
 
     // ── Navigate to Studio Tracks ────────────────────────────────────────────────
     sse(res, { status: 'NAVIGATING', message: 'Acedendo ao Studio...' })
-    await page.goto('https://studio.beatstars.com/content/tracks', { waitUntil: 'networkidle2' })
-    await new Promise(r => setTimeout(r, 2000))
+    await page.goto('https://studio.beatstars.com/content/tracks', { waitUntil: 'domcontentloaded' })
+    // Wait for "Create Track" button — confirms page loaded and session is active in Studio
+    await page.waitForFunction(
+      () => Array.from(document.querySelectorAll('button')).some(b => /create\s*track/i.test(b.textContent)),
+      { timeout: 30000 }
+    )
+    await new Promise(r => setTimeout(r, 1000))
 
     // Click "+ Create Track" button (blue button in page header)
     await page.evaluate(() => {
