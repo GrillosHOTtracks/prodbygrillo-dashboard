@@ -117,19 +117,32 @@ function CardTrending({ niches, markets, typeBeat, hottestNiche, hottestMarket }
 }) {
   const [tab, setTab]             = useState<TrendingTab>('videos')
   const [filterNiche, setFilter]  = useState<string>('all')
+  const [minViews, setMinViews]   = useState<number>(0)
 
   const maxNicheTotal = niches[0]?.total || 1
   const maxMktTotal   = markets[0]?.total || 1
   const hotNicheLabel = niches.find(n => n.id === hottestNiche)?.label || hottestNiche
   const noData        = niches.every(n => n.total === 0)
 
-  // Flat video list filtered by niche
-  const allVideos: (VideoItem & { nicheLabel: string })[] = niches.flatMap(n =>
-    n.sample.map(v => ({ ...v, nicheLabel: n.label }))
-  )
-  const filteredVideos = filterNiche === 'all'
+  // Flat video list: global sort by views desc, then apply niche + views filters
+  const allVideos: (VideoItem & { nicheLabel: string })[] = niches
+    .flatMap(n => n.sample.map(v => ({ ...v, nicheLabel: n.label })))
+    .sort((a, b) => b.views - a.views)
+
+  const baseVideos = filterNiche === 'all'
     ? allVideos
-    : niches.find(n => n.id === filterNiche)?.sample.map(v => ({ ...v, nicheLabel: niches.find(x => x.id === filterNiche)!.label })) ?? []
+    : (niches.find(n => n.id === filterNiche)?.sample ?? [])
+        .map(v => ({ ...v, nicheLabel: niches.find(x => x.id === filterNiche)!.label }))
+        .sort((a, b) => b.views - a.views)
+
+  const filteredVideos = minViews === 0 ? baseVideos : baseVideos.filter(v => v.views >= minViews)
+
+  const VIEW_FILTERS: { label: string; value: number }[] = [
+    { label: 'TODOS', value: 0 },
+    { label: '1K+',   value: 1_000 },
+    { label: '10K+',  value: 10_000 },
+    { label: '100K+', value: 100_000 },
+  ]
 
   return (
     <div style={card}>
@@ -183,8 +196,27 @@ function CardTrending({ niches, markets, typeBeat, hottestNiche, hottestMarket }
             ))}
           </div>
 
+          {/* Views filter */}
+          <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+            <span style={{ ...lbl, marginRight: 2 }}>views</span>
+            {VIEW_FILTERS.map(f => (
+              <button
+                key={f.value}
+                onClick={() => setMinViews(f.value)}
+                style={{
+                  fontSize: '9px', padding: '2px 7px',
+                  border: `1px solid ${minViews === f.value ? 'var(--accent)' : 'var(--border)'}`,
+                  background: minViews === f.value ? 'var(--accent-muted)' : 'transparent',
+                  color: minViews === f.value ? 'var(--accent)' : 'var(--text-faint)',
+                  cursor: 'pointer', fontFamily: 'Courier New, monospace', letterSpacing: '0.5px',
+                }}
+              >{f.label}</button>
+            ))}
+            <span style={{ ...lbl, marginLeft: 4 }}>{filteredVideos.length} resultados</span>
+          </div>
+
           {/* Scrollable video list */}
-          <div style={{ overflowY: 'auto', flex: 1, maxHeight: 340, display: 'flex', flexDirection: 'column', gap: 0 }}>
+          <div style={{ overflowY: 'auto', flex: 1, maxHeight: 300, display: 'flex', flexDirection: 'column', gap: 0 }}>
             {filteredVideos.length === 0 ? (
               <p style={{ color: 'var(--text-faint)', fontSize: '10px', padding: '8px 0' }}>sem vídeos</p>
             ) : filteredVideos.map((v, i) => (
