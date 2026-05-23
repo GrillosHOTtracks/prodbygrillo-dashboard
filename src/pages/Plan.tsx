@@ -24,7 +24,8 @@ interface EngagementItem {
   channel: string
   flag: string
   views: number
-  suggestedComment: string
+  commentPt: string
+  commentEn: string
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
@@ -270,12 +271,12 @@ REGRAS: máximo 7 itens · IDs únicos em kebab-case sem repetir os de ontem · 
   }, [loading, channelInfo, analyticsData, videos, today])
 
   // ── fetchEngagement ────────────────────────────────────────────────────────
-  const fetchEngagement = useCallback(async () => {
+  const fetchEngagement = useCallback(async (bust = false) => {
     if (engLoading) return
     setEngLoading(true)
 
     try {
-      // Step 1: get top market videos (cached on server, fast)
+      // Step 1: get market videos (cached on server — fast)
       const mRes = await fetch('/api/market')
       if (!mRes.ok) throw new Error(`market HTTP ${mRes.status}`)
       const mData = await mRes.json()
@@ -284,55 +285,65 @@ REGRAS: máximo 7 itens · IDs únicos em kebab-case sem repetir os de ontem · 
       const allVids: RawVid[] = (mData.niches as Array<{ sample: RawVid[] }>)
         .flatMap(n => n.sample ?? [])
         .filter(v => v.videoId)
-        .sort((a, b) => b.views - a.views)
-        .slice(0, 5)
 
       if (!allVids.length) throw new Error('Sem vídeos no mercado — abre a aba MERCADO primeiro')
 
-      // Step 2: LAIS generates authentic comments
-      const videoList = allVids.map((v, i) =>
-        `${i + 1}. videoId="${v.videoId}" | title="${v.title.slice(0, 60)}" | channel="${v.channel}"`
+      // On bust: exclude currently shown videos so we always get fresh ones
+      const currentIds = new Set(bust ? (engagement?.map(e => e.videoId) ?? []) : [])
+      const pool = allVids.filter(v => !currentIds.has(v.videoId!))
+
+      // Shuffle for variety, then pick top 5 by views from the shuffled slice
+      const shuffled = [...(pool.length >= 5 ? pool : allVids)].sort(() => Math.random() - 0.5)
+      const selected = shuffled.slice(0, 20).sort((a, b) => b.views - a.views).slice(0, 5)
+
+      // Step 2: LAIS generates PT-BR + EN comments, specific to each video's niche/artist
+      const videoList = selected.map((v, i) =>
+        `${i + 1}. videoId="${v.videoId}" | title="${v.title.slice(0, 70)}" | channel="${v.channel}"`
       ).join('\n')
 
-      const question = `You write authentic YouTube comments for hip-hop/beat music videos.
+      const question = `You are an expert in hip-hop, trap, RnB, and beat music culture. Write authentic YouTube comments for these videos.
 
 Videos:
 ${videoList}
 
-Write ONE genuine comment per video (15-30 words, English). Rules:
-- Specific to the artist/sound in the title (reference their style, era, or known tracks)
-- Sound like a real listener, NOT a producer or someone promoting something
-- Never mention beats, selling, or self-promotion
-- Natural tone — vary between excitement, question, cultural reference, mood description
-- Avoid generic openers like "this is fire" or "goes hard" — be original
+For EACH video write TWO comments:
+1. commentPt: in Brazilian Portuguese (casual, 15-25 words). Must sound like a real Brazilian fan.
+2. commentEn: in English (casual, 15-25 words). Must sound like a real music fan.
 
-Reply ONLY in JSON (no markdown):
-{"comments":[{"videoId":"ID_HERE","comment":"..."},{"videoId":"ID_HERE","comment":"..."}]}`
+Rules for BOTH comments:
+- Analyze the artist name(s) in the title and write something specific to their style, era, or known songs
+- Sound like a genuine listener — NOT a producer or anyone promoting something
+- Never mention "beat", "type beat", "production", or self-promotion
+- No generic phrases like "this is fire", "goes hard", "slaps" — be specific and original
+- Vary the tone: excitement, nostalgia, question, cultural reference, mood description
 
-      const full   = await laisChat(question, 1024)
-      const parsed = extractJson(full) as { comments: { videoId: string; comment: string }[] }
+Reply ONLY in valid JSON (no markdown, no text before or after):
+{"comments":[{"videoId":"ID","commentPt":"...","commentEn":"..."}]}`
 
-      const commentMap: Record<string, string> = {}
-      parsed.comments.forEach(c => { commentMap[c.videoId] = c.comment })
+      const full   = await laisChat(question, 1500)
+      const parsed = extractJson(full) as { comments: { videoId: string; commentPt: string; commentEn: string }[] }
 
-      const result: EngagementItem[] = allVids.map(v => ({
-        videoId:          v.videoId!,
-        title:            v.title,
-        channel:          v.channel,
-        flag:             v.flag,
-        views:            v.views,
-        suggestedComment: commentMap[v.videoId!] ?? '',
+      const commentMap: Record<string, { pt: string; en: string }> = {}
+      parsed.comments.forEach(c => { commentMap[c.videoId] = { pt: c.commentPt ?? '', en: c.commentEn ?? '' } })
+
+      const result: EngagementItem[] = selected.map(v => ({
+        videoId:   v.videoId!,
+        title:     v.title,
+        channel:   v.channel,
+        flag:      v.flag,
+        views:     v.views,
+        commentPt: commentMap[v.videoId!]?.pt ?? '',
+        commentEn: commentMap[v.videoId!]?.en ?? '',
       }))
 
       setEngagement(result)
       localStorage.setItem(`engagement_${today}`, JSON.stringify(result))
     } catch (err: any) {
       console.warn('[engagement]', err.message)
-      // Don't show error for engagement — it's secondary content
     } finally {
       setEngLoading(false)
     }
-  }, [engLoading, today])
+  }, [engLoading, today, engagement])
 
   // ── Auto-fetch on mount ────────────────────────────────────────────────────
   useEffect(() => {
@@ -519,13 +530,13 @@ Reply ONLY in JSON (no markdown):
             </div>
           </div>
           <button
-            onClick={fetchEngagement}
+            onClick={() => fetchEngagement(true)}
             disabled={engLoading}
             style={{ ...retroBtn, opacity: engLoading ? 0.4 : 1 }}
             onMouseEnter={e => { if (!engLoading) { (e.currentTarget as HTMLElement).style.borderColor = '#00aa00'; (e.currentTarget as HTMLElement).style.color = '#00aa00' } }}
             onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = '#2a2a2a'; (e.currentTarget as HTMLElement).style.color = '#555555' }}
           >
-            {engLoading ? '[ A GERAR... ]' : '[ ATUALIZAR ]'}
+            {engLoading ? '[ A GERAR... ]' : '[ 5 NOVOS VÍDEOS ]'}
           </button>
         </div>
 
@@ -553,7 +564,7 @@ Reply ONLY in JSON (no markdown):
                 [ IR PARA MERCADO ]
               </button>
               <button
-                onClick={fetchEngagement}
+                onClick={() => fetchEngagement(false)}
                 style={retroBtn}
                 onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = '#00aa00'; (e.currentTarget as HTMLElement).style.color = '#00aa00' }}
                 onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = '#2a2a2a'; (e.currentTarget as HTMLElement).style.color = '#555555' }}
@@ -587,15 +598,31 @@ Reply ONLY in JSON (no markdown):
                     </div>
                   </div>
 
-                  {/* Suggested comment */}
-                  {item.suggestedComment && (
-                    <div style={{ backgroundColor: '#050505', border: '1px solid #1a3a1a', padding: '7px 10px', marginBottom: '8px' }}>
-                      <p style={{ color: '#00aa00', fontSize: '10px', margin: '0 0 3px', letterSpacing: '0.5px' }}>COMENTÁRIO SUGERIDO:</p>
-                      <p style={{ color: '#a0a0a0', fontSize: '11px', margin: 0, lineHeight: 1.5, fontStyle: 'italic' }}>
-                        "{item.suggestedComment}"
-                      </p>
-                    </div>
-                  )}
+                  {/* Comments: PT-BR + EN */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '8px' }}>
+                    {item.commentPt && (
+                      <div style={{ backgroundColor: '#050505', border: '1px solid #1a2a1a', padding: '7px 10px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                          <span style={{ color: '#00aa00', fontSize: '9px', letterSpacing: '1px' }}>🇧🇷 PT-BR</span>
+                          <CopyBtn text={item.commentPt} label="[ COPIAR PT ]" />
+                        </div>
+                        <p style={{ color: '#a0a0a0', fontSize: '11px', margin: 0, lineHeight: 1.5, fontStyle: 'italic' }}>
+                          "{item.commentPt}"
+                        </p>
+                      </div>
+                    )}
+                    {item.commentEn && (
+                      <div style={{ backgroundColor: '#050505', border: '1px solid #1a2030', padding: '7px 10px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                          <span style={{ color: '#5588aa', fontSize: '9px', letterSpacing: '1px' }}>🇺🇸 EN</span>
+                          <CopyBtn text={item.commentEn} label="[ COPIAR EN ]" />
+                        </div>
+                        <p style={{ color: '#a0a0a0', fontSize: '11px', margin: 0, lineHeight: 1.5, fontStyle: 'italic' }}>
+                          "{item.commentEn}"
+                        </p>
+                      </div>
+                    )}
+                  </div>
 
                   {/* Actions */}
                   <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
@@ -609,9 +636,6 @@ Reply ONLY in JSON (no markdown):
                     >
                       [ ABRIR VÍDEO ]
                     </a>
-                    {item.suggestedComment && (
-                      <CopyBtn text={item.suggestedComment} label="[ COPIAR COMENTÁRIO ]" />
-                    )}
                     <button
                       onClick={() => toggleEngDone(item.videoId)}
                       style={{ background: done ? '#0a1a0a' : 'transparent', border: `1px solid ${done ? '#00ff00' : '#1a1a1a'}`, color: done ? '#00ff00' : '#333333', fontSize: '9px', padding: '3px 8px', cursor: 'pointer', fontFamily: 'Courier New, monospace', letterSpacing: '0.5px', flexShrink: 0 }}
