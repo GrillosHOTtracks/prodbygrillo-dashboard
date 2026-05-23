@@ -196,18 +196,21 @@ function buildPrompt(beatName, detectedBpm, detectedKey, marketCtx) {
       (detectedKey !== null ? `- Key: ${detectedKey}\n` : '')
     : ''
 
-  const marketNote = marketCtx
-    ? `\n\nMARKET INTELLIGENCE — live YouTube data — OVERRIDE all generic choices:\n` +
-      `- Primary trending artist: ${marketCtx.artist} → MUST be first in matchingArtists and in optimizedTitle\n` +
-      `- Hot niche right now: ${marketCtx.niche}\n` +
-      `- Hot market: ${marketCtx.hotMarket}\n` +
-      `- Top reference artists (use as tags + secondary matchingArtists): ${(marketCtx.keywords || []).slice(0, 8).join(', ')}\n` +
-      (!detectedBpm && marketCtx.bpm ? `- Niche BPM suggestion: ${marketCtx.bpm} — use this as bpm if not detected from audio\n` : '') +
-      (!detectedKey && marketCtx.key ? `- Niche key suggestion: ${marketCtx.key} — use this as key if not detected from audio\n` : '') +
-      `- Tags MUST include the top reference artists above + market-specific keywords\n` +
-      `- Hashtags MUST target ${marketCtx.hotMarket} market\n` +
-      `- thumbnail.concept MUST reflect the ${marketCtx.niche} aesthetic (colors, mood, composition)\n`
-    : ''
+  const marketNote = (() => {
+    if (!marketCtx) return ''
+    const clean = s => String(s || '').replace(/[^\w\s\-.,#&'()]/g, '').trim().slice(0, 60)
+    const artist   = clean(marketCtx.artist)
+    const niche    = clean(marketCtx.niche)
+    const keywords = (marketCtx.keywords || []).slice(0, 8).map(k => clean(k)).filter(Boolean).join(', ')
+    const bpmLine  = !detectedBpm && marketCtx.bpm  ? `- Use BPM: ${marketCtx.bpm}\n` : ''
+    const keyLine  = !detectedKey && marketCtx.key  ? `- Use key: ${clean(marketCtx.key)}\n` : ''
+    return `\n\nMARKET DATA (use this to override generic choices):\n` +
+      `- Primary artist: ${artist} (put first in matchingArtists and in optimizedTitle)\n` +
+      `- Niche: ${niche}\n` +
+      `- Reference artists for tags: ${keywords}\n` +
+      bpmLine + keyLine +
+      `- thumbnail.concept must reflect the ${niche} niche aesthetic\n`
+  })()
 
   return `You are an expert in YouTube SEO and digital marketing for beat producers, with encyclopedic knowledge of RnB, PluggnB, Melodic Trap, Drill, Afrobeats, and all instrumental/type-beat subgenres.
 
@@ -341,7 +344,7 @@ router.post('/analyze-beat', async (req, res) => {
       try {
         const stream = await client.chat.completions.create({
           model: MODELS[mi],
-          max_tokens: 3500,
+          max_tokens: 4096,
           stream: true,
           messages: [{ role: 'user', content: buildPrompt(beatName.trim(), detectedBpm, detectedKey, marketContext || null) }],
         })
