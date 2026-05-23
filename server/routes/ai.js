@@ -353,13 +353,23 @@ router.post('/analyze-beat', async (req, res) => {
       clean = clean.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim()
     }
 
-    // Repair malformed JSON from the model (unescaped quotes, missing commas,
-    // bare newlines in strings, etc.) then validate the result
-    try { JSON.parse(clean) } catch { clean = jsonrepair(clean) }
+    // Parse with progressive fallback: raw → repair → sanitize+repair
+    let parsed
+    try {
+      parsed = JSON.parse(clean)
+    } catch {
+      try {
+        parsed = JSON.parse(jsonrepair(clean))
+      } catch {
+        try {
+          parsed = JSON.parse(jsonrepair(sanitizeJsonStrings(clean)))
+        } catch (finalErr) {
+          throw new Error(`IA devolveu JSON inválido: ${finalErr.message}`)
+        }
+      }
+    }
 
     // Override description with server-built version — guaranteed correct format
-    // regardless of which model generated the response
-    const parsed = JSON.parse(clean)
     parsed.description = buildDescription(parsed, beatName.trim(), detectedBpm, detectedKey)
     clean = JSON.stringify(parsed)
 
