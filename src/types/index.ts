@@ -1,4 +1,4 @@
-export type Page = 'overview' | 'videos' | 'analytics' | 'audience' | 'revenue' | 'scheduler' | 'beatstore' | 'settings' | 'market'
+export type Page = 'overview' | 'videos' | 'analytics' | 'audience' | 'revenue' | 'plan' | 'scheduler' | 'beatstore' | 'settings' | 'market'
 
 export type DateRange = '7d' | '28d' | '90d' | '365d'
 

@@ -485,6 +485,35 @@ export function IconAI({ size = 20 }: { size?: number }) {
   )
 }
 
+export function IconPlan({ size = 20 }: { size?: number }) {
+  const crisp = { style: { imageRendering: 'pixelated' as const }, viewBox: '0 0 20 20', fill: 'none' }
+  return (
+    <svg {...crisp} width={size} height={size}>
+      {/* Calendar body */}
+      <rect x="2" y="4" width="16" height="14" fill="currentColor" opacity="0.25"/>
+      <rect x="2" y="4" width="16" height="1" fill="currentColor" opacity="0.6"/>
+      <rect x="2" y="4" width="1" height="14" fill="currentColor" opacity="0.6"/>
+      <rect x="17" y="5" width="1" height="13" fill="currentColor" opacity="0.2"/>
+      <rect x="3" y="17" width="14" height="1" fill="currentColor" opacity="0.2"/>
+      {/* Header bar */}
+      <rect x="2" y="4" width="16" height="4" fill="currentColor" opacity="0.5"/>
+      {/* Binding pegs */}
+      <rect x="6"  y="2" width="2" height="4" fill="currentColor" opacity="0.8"/>
+      <rect x="12" y="2" width="2" height="4" fill="currentColor" opacity="0.8"/>
+      {/* Checklist lines */}
+      <rect x="5" y="10" width="2" height="1" fill="currentColor" opacity="0.9"/>
+      <rect x="8" y="10" width="7" height="1" fill="currentColor" opacity="0.5"/>
+      <rect x="5" y="12" width="2" height="1" fill="currentColor" opacity="0.9"/>
+      <rect x="8" y="12" width="5" height="1" fill="currentColor" opacity="0.5"/>
+      <rect x="5" y="14" width="2" height="1" fill="currentColor" opacity="0.4"/>
+      <rect x="8" y="14" width="7" height="1" fill="currentColor" opacity="0.3"/>
+      {/* Check mark on first item */}
+      <rect x="5" y="10" width="1" height="1" fill="currentColor"/>
+      <rect x="6" y="11" width="1" height="1" fill="currentColor"/>
+    </svg>
+  )
+}
+
 export function IconMarket({ size = 20 }: { size?: number }) {
   const crisp = { style: { imageRendering: 'pixelated' as const }, viewBox: '0 0 20 20', fill: 'none' }
   return (

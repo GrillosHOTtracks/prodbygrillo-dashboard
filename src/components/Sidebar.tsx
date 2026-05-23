@@ -3,7 +3,7 @@ import type { Page } from '../types'
 import { ChevronRight } from 'lucide-react'
 import {
   IconMonitor, IconCamera, IconBarChart,
-  IconAudience, IconCoin, IconGear, IconAI, IconStore, IconMarket,
+  IconAudience, IconCoin, IconGear, IconAI, IconStore, IconMarket, IconPlan,
 } from './PixelIcons'
 
 type NavItem = {
@@ -19,6 +19,7 @@ const navItems: NavItem[] = [
   { id: 'audience',   label: 'AUDIENCE',   Icon: IconAudience },
   { id: 'revenue',    label: 'REVENUE',    Icon: IconCoin     },
   { id: 'market',     label: 'MERCADO',    Icon: IconMarket   },
+  { id: 'plan',       label: 'PLANO',      Icon: IconPlan     },
   { id: 'scheduler',  label: 'SCHEDULER',  Icon: IconAI       },
   { id: 'beatstore',  label: 'BEAT STORE', Icon: IconStore    },
   { id: 'settings',   label: 'SETTINGS',   Icon: IconGear     },
