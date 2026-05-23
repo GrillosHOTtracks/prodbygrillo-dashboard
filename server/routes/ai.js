@@ -390,10 +390,11 @@ router.post('/analyze-beat', async (req, res) => {
 
 // POST /api/ai/chat — Groq llama-3.3-70b, SSE streaming
 router.post('/chat', async (req, res) => {
-  const { question, context, history } = req.body
+  const { question, context, history, maxTokens } = req.body
   if (!question || typeof question !== 'string' || !question.trim()) {
     return res.status(400).json({ error: 'question is required' })
   }
+  const tokenLimit = typeof maxTokens === 'number' ? Math.min(Math.max(maxTokens, 256), 4096) : 1024
 
   const apiKey = process.env.GROQ_API_KEY
   if (!apiKey) {
@@ -418,7 +419,7 @@ router.post('/chat', async (req, res) => {
       try {
         const stream = await client.chat.completions.create({
           model:      MODELS[mi],
-          max_tokens: 1024,
+          max_tokens: tokenLimit,
           stream:     true,
           messages:   [{ role: 'user', content: prompt }],
         })
