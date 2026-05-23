@@ -33,12 +33,11 @@ const upload = multer({
 function readHistory()     { try { return JSON.parse(fs.readFileSync(DATA_FILE, 'utf-8')) } catch { return [] } }
 function writeHistory(arr) { fs.writeFileSync(DATA_FILE, JSON.stringify(arr, null, 2)) }
 
-// ─── Artist photo helpers — multi-source ────────────────────────────────────
+// ─── Artist photo helpers — no API key required ──────────────────────────────
 
-function fetchJson(url, headers = {}) {
+function fetchJson(url) {
   return new Promise((resolve, reject) => {
-    const client = url.startsWith('https') ? https : http
-    const req = client.get(url, { headers }, apiRes => {
+    const req = https.get(url, apiRes => {
       let body = ''
       apiRes.on('data', c => body += c)
       apiRes.on('end', () => { try { resolve(JSON.parse(body)) } catch (e) { reject(e) } })
@@ -48,37 +47,13 @@ function fetchJson(url, headers = {}) {
   })
 }
 
-// Spotify: cache token (expires in 1h)
-let _spotifyToken = null, _spotifyExpiry = 0
-async function getSpotifyToken(id, secret) {
-  if (_spotifyToken && Date.now() < _spotifyExpiry - 30000) return _spotifyToken
-  const creds = Buffer.from(`${id}:${secret}`).toString('base64')
-  const body  = 'grant_type=client_credentials'
-  return new Promise((resolve, reject) => {
-    const req = https.request({
-      hostname: 'accounts.spotify.com', path: '/api/token', method: 'POST',
-      headers: { Authorization: `Basic ${creds}`, 'Content-Type': 'application/x-www-form-urlencoded', 'Content-Length': Buffer.byteLength(body) }
-    }, res => {
-      let d = ''; res.on('data', c => d += c)
-      res.on('end', () => {
-        try {
-          const j = JSON.parse(d)
-          _spotifyToken = j.access_token; _spotifyExpiry = Date.now() + j.expires_in * 1000
-          resolve(_spotifyToken)
-        } catch (e) { reject(e) }
-      })
-    })
-    req.on('error', reject); req.write(body); req.end()
-  })
-}
-
 async function photosDeezer(name) {
   try {
     const d = await fetchJson(`https://api.deezer.com/search/artist?q=${encodeURIComponent(name)}&limit=8`)
     return (d.data || [])
       .filter(a => a.picture_xl && !a.picture_xl.includes('//1000x1000'))
       .sort((a, b) => (b.nb_fan || 0) - (a.nb_fan || 0))
-      .slice(0, 4)
+      .slice(0, 5)
       .map(a => ({ url: a.picture_xl, title: a.name, source: 'deezer' }))
   } catch { return [] }
 }
@@ -88,85 +63,21 @@ async function photosItunes(name) {
     const d = await fetchJson(`https://itunes.apple.com/search?term=${encodeURIComponent(name)}&entity=musicArtist&limit=5`)
     return (d.results || [])
       .filter(a => a.artworkUrl100)
-      .slice(0, 3)
+      .slice(0, 4)
       .map(a => ({ url: a.artworkUrl100.replace('100x100bb', '600x600bb'), title: a.artistName, source: 'itunes' }))
   } catch { return [] }
 }
 
-async function photosLastfm(name) {
-  const key = process.env.LASTFM_API_KEY; if (!key) return []
-  try {
-    const d = await fetchJson(`https://ws.audioscrobbler.com/2.0/?method=artist.getinfo&artist=${encodeURIComponent(name)}&api_key=${key}&format=json`)
-    const images = d.artist?.image || []
-    const best = images.find(i => i.size === 'mega' && i['#text']) || images.find(i => i.size === 'extralarge' && i['#text'])
-    return best ? [{ url: best['#text'], title: d.artist?.name || name, source: 'lastfm' }] : []
-  } catch { return [] }
-}
-
-async function photosDiscogs(name) {
-  const token = process.env.DISCOGS_TOKEN; if (!token) return []
-  try {
-    const d = await fetchJson(
-      `https://api.discogs.com/database/search?q=${encodeURIComponent(name)}&type=artist&per_page=5`,
-      { Authorization: `Discogs token=${token}`, 'User-Agent': 'prodbygrillo-dashboard/1.0' }
-    )
-    return (d.results || [])
-      .filter(r => r.cover_image && !r.cover_image.includes('spacer') && !r.cover_image.includes('no_image'))
-      .slice(0, 3)
-      .map(r => ({ url: r.cover_image, title: r.title, source: 'discogs' }))
-  } catch { return [] }
-}
-
-async function photosGenius(name) {
-  const token = process.env.GENIUS_TOKEN; if (!token) return []
-  try {
-    const d = await fetchJson(
-      `https://api.genius.com/search?q=${encodeURIComponent(name)}`,
-      { Authorization: `Bearer ${token}` }
-    )
-    const seen = new Map()
-    for (const hit of (d.response?.hits || [])) {
-      const a = hit.result?.primary_artist
-      if (a?.header_image_url && !seen.has(a.id)) seen.set(a.id, { url: a.header_image_url, title: a.name, source: 'genius' })
-    }
-    return [...seen.values()].slice(0, 3)
-  } catch { return [] }
-}
-
-async function photosSpotify(name) {
-  const id = process.env.SPOTIFY_CLIENT_ID, secret = process.env.SPOTIFY_CLIENT_SECRET
-  if (!id || !secret) return []
-  try {
-    const token = await getSpotifyToken(id, secret)
-    const d = await fetchJson(
-      `https://api.spotify.com/v1/search?q=${encodeURIComponent(name)}&type=artist&limit=5`,
-      { Authorization: `Bearer ${token}` }
-    )
-    return (d.artists?.items || [])
-      .filter(a => a.images?.length)
-      .slice(0, 3)
-      .map(a => ({ url: a.images[0].url, title: a.name, source: 'spotify' }))
-  } catch { return [] }
-}
-
 // ─── GET /api/upload/artist-photo?name= ─────────────────────────────────────
-// Fetches from all configured sources in parallel and returns merged results
+// Deezer (picture_xl 1000px) + iTunes (artwork 600px) — no API key required
 router.get('/artist-photo', async (req, res) => {
   const { name } = req.query
   if (!name || typeof name !== 'string') return res.status(400).json({ error: 'name required' })
 
-  const [deezer, itunes, lastfm, discogs, genius, spotify] = await Promise.all([
-    photosDeezer(name),
-    photosItunes(name),
-    photosLastfm(name),
-    photosDiscogs(name),
-    photosGenius(name),
-    photosSpotify(name),
-  ])
+  const [deezer, itunes] = await Promise.all([photosDeezer(name), photosItunes(name)])
 
-  // Merge, dedupe by URL
   const seen = new Set()
-  const items = [...deezer, ...spotify, ...itunes, ...lastfm, ...discogs, ...genius].filter(item => {
+  const items = [...deezer, ...itunes].filter(item => {
     if (!item.url || seen.has(item.url)) return false
     seen.add(item.url); return true
   })
