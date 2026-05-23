@@ -15,6 +15,7 @@ const pageTitles: Record<Page, string> = {
   revenue:   '=[ REVENUE ]==================================',
   scheduler:  '=[ SCHEDULER / UPLOAD ]=======================',
   beatstore:  '=[ BEAT STORE · BEATSTARS ]==================',
+  market:     '=[ MERCADO · INTELIGÊNCIA DE VENDAS ]========',
   settings:   '=[ SETTINGS ]=================================',
 }
 
