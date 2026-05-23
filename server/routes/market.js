@@ -504,4 +504,20 @@ router.get('/comments', async (req, res) => {
   res.json({ results })
 })
 
+// ─── Artist official videos ───────────────────────────────────────────────────
+router.get('/artist-videos', async (req, res) => {
+  const artists = (req.query.artists || '').split(',').map(s => s.trim()).filter(Boolean).slice(0, 5)
+  if (!artists.length) return res.json({ videos: [] })
+  const settled = await Promise.allSettled(artists.map(async artist => {
+    const vids = await searchYT(`${artist} official music video`, 'US', 'en')
+    const best = vids.find(v => v.videoId && v.durationSec > 60)
+    if (!best) return null
+    return { artist, videoId: best.videoId, title: best.title, channel: best.channel }
+  }))
+  const videos = settled
+    .filter(r => r.status === 'fulfilled' && r.value)
+    .map(r => r.value)
+  res.json({ videos })
+})
+
 module.exports = router

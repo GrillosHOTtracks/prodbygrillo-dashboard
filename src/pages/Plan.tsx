@@ -22,8 +22,7 @@ interface EngagementItem {
   videoId: string
   title: string
   channel: string
-  flag: string
-  views: number
+  artist: string
   commentPt: string
   commentEn: string
 }
@@ -46,16 +45,41 @@ const retroBtn: React.CSSProperties = {
 const VALID_PAGES: Page[] = ['overview', 'videos', 'analytics', 'audience', 'revenue', 'plan', 'scheduler', 'beatstore', 'market', 'settings']
 const DAYS_PT = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado']
 
+function extractTypeBeatArtist(title: string): string | null {
+  const m = title.match(/^(.+?)\s+(?:free\s+)?type[\s-]?beat\b/i)
+  if (!m) return null
+  let artist = m[1]
+    .replace(/^\[?free\]?\s*/i, '')
+    .replace(/^\[.*?\]\s*/, '')
+    .replace(/^\(.*?\)\s*/, '')
+    .replace(/[-|–—:]\s*$/, '')
+    .trim()
+  if (!artist || artist.length < 2 || artist.length > 40) return null
+  if (/^(trap|drill|rnb|r&b|free|dark|melodic|hard|sad|chill|phonk|rap|hip\s*hop|free\s*beat|beat|instrumental|type|new|latest|hot|official)$/i.test(artist)) return null
+  if (/^\d/.test(artist)) return null
+  return artist.split(/\s+[xX×&]\s+/)[0].trim() || null
+}
+
+function extractArtists(niches: Array<{ sample: Array<{ title: string }> }>): string[] {
+  const freq: Record<string, number> = {}
+  for (const niche of niches) {
+    for (const v of (niche.sample ?? [])) {
+      const a = extractTypeBeatArtist(v.title)
+      if (a) freq[a] = (freq[a] ?? 0) + 1
+    }
+  }
+  return Object.entries(freq)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 10)
+    .map(([name]) => name)
+}
+
 function sanitizePage(p: unknown): Page | undefined {
   return VALID_PAGES.includes(p as Page) ? (p as Page) : undefined
 }
 
 function todayStr() {
   return new Date().toISOString().slice(0, 10)
-}
-
-function fmtViews(n: number) {
-  return n >= 1000000 ? `${(n / 1000000).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n)
 }
 
 // ─── System prompt for all Plan/LAIS calls ────────────────────────────────────
@@ -289,46 +313,47 @@ REGRAS: máximo 7 itens · IDs únicos em kebab-case sem repetir os de ontem · 
     setEngLoading(true)
 
     try {
-      // Step 1: get market videos (cached on server — fast)
+      // Step 1: get market data to extract trending artists
       const mRes = await fetch('/api/market')
       if (!mRes.ok) throw new Error(`market HTTP ${mRes.status}`)
       const mData = await mRes.json()
 
-      type RawVid = { videoId?: string; title: string; channel: string; flag: string; views: number }
-      const allVids: RawVid[] = (mData.niches as Array<{ sample: RawVid[] }>)
-        .flatMap(n => n.sample ?? [])
-        .filter(v => v.videoId)
+      const artists = extractArtists(mData.niches as Array<{ sample: Array<{ title: string }> }>)
+      if (!artists.length) throw new Error('Sem artistas no mercado — abre a aba MERCADO primeiro')
 
-      if (!allVids.length) throw new Error('Sem vídeos no mercado — abre a aba MERCADO primeiro')
+      // On bust: shuffle to rotate through different artists
+      const pool = bust ? [...artists].sort(() => Math.random() - 0.5) : artists
+      const selected5 = pool.slice(0, 5)
 
-      // On bust: exclude currently shown videos so we always get fresh ones
-      const currentIds = new Set(bust ? (engagement?.map(e => e.videoId) ?? []) : [])
-      const pool = allVids.filter(v => !currentIds.has(v.videoId!))
+      // Step 2: fetch official videos for each artist via Innertube
+      const avRes = await fetch(`/api/market/artist-videos?artists=${encodeURIComponent(selected5.join(','))}`)
+      if (!avRes.ok) throw new Error(`artist-videos HTTP ${avRes.status}`)
+      const avData = await avRes.json() as { videos: Array<{ artist: string; videoId: string; title: string; channel: string }> }
 
-      // Shuffle for variety, then pick top 5 by views from the shuffled slice
-      const shuffled = [...(pool.length >= 5 ? pool : allVids)].sort(() => Math.random() - 0.5)
-      const selected = shuffled.slice(0, 20).sort((a, b) => b.views - a.views).slice(0, 5)
+      const artistVids = avData.videos.filter(v => v.videoId)
+      if (!artistVids.length) throw new Error('Não foi possível encontrar vídeos dos artistas')
 
-      // Step 2: LAIS generates PT-BR + EN comments, specific to each video's niche/artist
-      const videoList = selected.map((v, i) =>
-        `${i + 1}. videoId="${v.videoId}" | title="${v.title.slice(0, 70)}" | channel="${v.channel}"`
+      // Step 3: LAIS generates strategic comments with subtle producer angle
+      const videoList = artistVids.map((v, i) =>
+        `${i + 1}. videoId="${v.videoId}" | artist="${v.artist}" | title="${v.title.slice(0, 70)}"`
       ).join('\n')
 
-      const question = `You are an expert in hip-hop, trap, RnB, and beat music culture. Write authentic YouTube comments for these videos.
+      const question = `You are a music producer leaving comments on official artist YouTube videos. Be strategic but authentic.
 
 Videos:
 ${videoList}
 
 For EACH video write TWO comments:
-1. commentPt: in Brazilian Portuguese (casual, 15-25 words). Must sound like a real Brazilian fan.
-2. commentEn: in English (casual, 15-25 words). Must sound like a real music fan.
+1. commentPt: in Brazilian Portuguese (casual, 15-20 words)
+2. commentEn: in English (casual, 15-20 words)
 
-Rules for BOTH comments:
-- Analyze the artist name(s) in the title and write something specific to their style, era, or known songs
-- Sound like a genuine listener — NOT a producer or anyone promoting something
-- Never mention "beat", "type beat", "production", or self-promotion
-- No generic phrases like "this is fire", "goes hard", "slaps" — be specific and original
-- Vary the tone: excitement, nostalgia, question, cultural reference, mood description
+Rules:
+- Sound like a genuine music fan / fellow musician — NOT spam, NOT a promoter
+- Subtly hint that you produce beats in that style WITHOUT saying it directly
+- NEVER use: "beat", "type beat", BeatStars, links, or direct self-promotion
+- Subtle hints examples: "This vibe is exactly what I've been working on lately", "Been deep in this sound for weeks", "Esse som é tudo que tenho produzido ultimamente"
+- Be specific to the artist's known sound or era — not generic
+- Vary tone: one comment = admiration/fan, other = personal/reflective producer angle
 
 Reply ONLY in valid JSON (no markdown, no text before or after):
 {"comments":[{"videoId":"ID","commentPt":"...","commentEn":"..."}]}`
@@ -339,14 +364,13 @@ Reply ONLY in valid JSON (no markdown, no text before or after):
       const commentMap: Record<string, { pt: string; en: string }> = {}
       parsed.comments.forEach(c => { commentMap[c.videoId] = { pt: c.commentPt ?? '', en: c.commentEn ?? '' } })
 
-      const result: EngagementItem[] = selected.map(v => ({
-        videoId:   v.videoId!,
+      const result: EngagementItem[] = artistVids.map(v => ({
+        videoId:   v.videoId,
         title:     v.title,
         channel:   v.channel,
-        flag:      v.flag,
-        views:     v.views,
-        commentPt: commentMap[v.videoId!]?.pt ?? '',
-        commentEn: commentMap[v.videoId!]?.en ?? '',
+        artist:    v.artist,
+        commentPt: commentMap[v.videoId]?.pt ?? '',
+        commentEn: commentMap[v.videoId]?.en ?? '',
       }))
 
       setEngagement(result)
@@ -356,7 +380,7 @@ Reply ONLY in valid JSON (no markdown, no text before or after):
     } finally {
       setEngLoading(false)
     }
-  }, [engLoading, today, engagement])
+  }, [engLoading, today])
 
   // ── Auto-fetch on mount ────────────────────────────────────────────────────
   useEffect(() => {
@@ -600,13 +624,12 @@ Reply ONLY in valid JSON (no markdown, no text before or after):
                 >
                   {/* Video info */}
                   <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', marginBottom: '8px' }}>
-                    <span style={{ fontSize: '14px', flexShrink: 0 }}>{item.flag}</span>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <p style={{ color: done ? '#444444' : '#c0c0c0', fontSize: '11px', margin: '0 0 2px', textDecoration: done ? 'line-through' : 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {idx + 1}. {item.title}
                       </p>
                       <p style={{ color: '#555555', fontSize: '10px', margin: 0 }}>
-                        {item.channel} · {fmtViews(item.views)} views
+                        <span style={{ color: '#00aa00' }}>{item.artist}</span> · {item.channel}
                       </p>
                     </div>
                   </div>
