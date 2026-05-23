@@ -193,14 +193,14 @@ function UploadHistory({ refreshKey }: { refreshKey: number }) {
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
-export function Scheduler({ onNavigate }: { onNavigate?: (page: Page) => void }) {
+export function Scheduler({ onNavigate, presetArtist, onPresetConsumed }: { onNavigate?: (page: Page) => void, presetArtist?: string, onPresetConsumed?: () => void }) {
   const [step, setStep] = useState<1|2|3|4>(1)
 
   // ── Etapa 1: files
   const [videoFile, setVideoFile]     = useState<File | null>(null)
   const [thumbFile, setThumbFile]     = useState<File | null>(null)
   const [thumbPreview, setThumbPreview] = useState<string | null>(null)
-  const [beatName, setBeatName]       = useState('')
+  const [beatName, setBeatName]       = useState(presetArtist ? `${presetArtist} Type Beat` : '')
   const videoInputRef                 = useRef<HTMLInputElement>(null)
   const thumbInputRef                 = useRef<HTMLInputElement>(null)
 
@@ -242,6 +242,9 @@ export function Scheduler({ onNavigate }: { onNavigate?: (page: Page) => void })
 
   // ── History
   const [histRefreshKey, setHistRefreshKey] = useState(0)
+
+  // ── Clear preset from App after reading it on mount
+  useEffect(() => { if (presetArtist) onPresetConsumed?.() }, [])
 
   // ── Published links (etapa 4)
   const [publishedYt, setPublishedYt] = useState<string | null>(null)

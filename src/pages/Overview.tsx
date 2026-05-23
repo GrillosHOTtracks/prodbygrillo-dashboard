@@ -72,7 +72,7 @@ joined  : ${info.publishedAt?.slice(0, 10) || 'N/A'}`
 }
 
 // ─── Artist Hub — full intelligence panel ─────────────────────────────────────
-function ArtistHub({ artists }: { artists: ArtistTrend[] }) {
+function ArtistHub({ artists, onUseInScheduler }: { artists: ArtistTrend[], onUseInScheduler?: (name: string) => void }) {
   const [tab, setTab] = useState<'ranking' | 'oportunidades' | 'inspiracao'>('ranking')
   const now       = new Date()
   const year      = now.getFullYear()
@@ -80,7 +80,6 @@ function ArtistHub({ artists }: { artists: ArtistTrend[] }) {
   const dayIdx    = now.getDay()
   const tipToday  = DAILY_TIPS[dayIdx]
 
-  // Top opportunity: high deezerFans + low beatCount
   const topOpp = [...artists].sort((a, b) => (b.opportunityScore ?? 0) - (a.opportunityScore ?? 0))
   const hotArtist = artists[0]
 
@@ -187,26 +186,33 @@ function ArtistHub({ artists }: { artists: ArtistTrend[] }) {
       {tab === 'ranking' && (
         <div style={{ overflowX: 'auto' }}>
           <p style={{ color: 'var(--text-faint)', fontSize: '10px', marginBottom: '10px', letterSpacing: '1px' }}>
-            type beats em {monthLabel} · Innertube (zero quota) · {artists.length} artistas · demand = views × frequência
+            type beats em {monthLabel} · YouTube Innertube · {artists.length} artistas · TEND = upload freq 7d vs 7d anterior
           </p>
-          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 720 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 820 }}>
             <thead>
               <tr>
                 <th style={TH}>#</th>
                 <th style={TH}></th>
-                <th style={{ ...TH, width: '16%' }}>ARTISTA</th>
-                <th style={{ ...TH, width: '16%' }}>DEMAND</th>
-                <th style={{ ...TH, textAlign: 'right' }}>FÃNS</th>
+                <th style={{ ...TH, width: '15%' }}>ARTISTA</th>
+                <th style={{ ...TH, width: '14%' }}>DEMAND</th>
                 <th style={{ ...TH, textAlign: 'center' }}>SAT.</th>
                 <th style={{ ...TH, textAlign: 'right' }}>BEATS</th>
+                <th style={{ ...TH, textAlign: 'right' }}>FREQ/7D</th>
                 <th style={{ ...TH, textAlign: 'right' }}>∅ VIEWS</th>
-                <th style={{ ...TH, textAlign: 'right' }}>TOTAL VIEWS</th>
+                <th style={{ ...TH, textAlign: 'right' }}>TOTAL</th>
+                <th style={{ ...TH, textAlign: 'right' }}>TENDÊNCIA</th>
                 <th style={TH}></th>
               </tr>
             </thead>
             <tbody>
               {artists.map((a, i) => {
                 const rankColor = i === 0 ? 'var(--accent)' : i === 1 ? '#c0c0c0' : i === 2 ? '#aa7700' : 'var(--text-faint)'
+                // Prefer viewsGrowth (snapshot) if available, else uploadGrowth
+                const growth = a.viewsGrowth ?? a.uploadGrowth ?? 0
+                const growthColor = growth > 15 ? '#00ff00' : growth > 0 ? '#aaff00' : growth < -15 ? '#ff4444' : growth < 0 ? '#ff8800' : 'var(--text-faint)'
+                const growthLabel = a.viewsGrowth != null
+                  ? `${growth > 0 ? '+' : ''}${growth}% views`
+                  : `${growth > 0 ? '+' : ''}${growth}% freq`
                 return (
                   <tr key={a.name}
                     style={{ transition: `background var(--t-fast)` }}
@@ -219,37 +225,38 @@ function ArtistHub({ artists }: { artists: ArtistTrend[] }) {
                     <td style={{ ...TD, padding: '6px 6px' }}>
                       <Avatar a={a} size={30} />
                     </td>
-                    <td style={{ ...TD, maxWidth: 140 }}>
+                    <td style={{ ...TD, maxWidth: 130 }}>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                         <span style={{ color: 'var(--text-bright)', fontWeight: 'bold', letterSpacing: '0.5px' }}>{a.name}</span>
-                        {a.hotTag && (
-                          <span style={{ fontSize: '9px', color: 'var(--text-faint)', letterSpacing: '0.5px' }}>{a.hotTag}</span>
-                        )}
+                        {a.hotTag && <span style={{ fontSize: '9px', color: 'var(--text-faint)', letterSpacing: '0.5px' }}>{a.hotTag}</span>}
                         {a.vibes && a.vibes.length > 0 && (
                           <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
                             {a.vibes.slice(0, 2).map(v => (
-                              <span key={v} style={{ fontSize: '8px', padding: '1px 4px', border: '1px solid var(--border)', color: 'var(--text-faint)', letterSpacing: '0.5px' }}>{v}</span>
+                              <span key={v} style={{ fontSize: '8px', padding: '1px 4px', border: '1px solid var(--border)', color: 'var(--text-faint)' }}>{v}</span>
                             ))}
                           </div>
                         )}
                       </div>
                     </td>
-                    <td style={TD}>
-                      <DemandBar score={a.demandScore ?? 0} />
-                    </td>
-                    <td style={{ ...TD, textAlign: 'right', color: 'var(--text-dim)', fontSize: '10px' }}>
-                      {a.deezerFans ? fmtNum(a.deezerFans) : '—'}
-                    </td>
-                    <td style={{ ...TD, textAlign: 'center' }}>
-                      <SatBadge s={a.saturation} />
-                    </td>
+                    <td style={TD}><DemandBar score={a.demandScore ?? 0} /></td>
+                    <td style={{ ...TD, textAlign: 'center' }}><SatBadge s={a.saturation} /></td>
                     <td style={{ ...TD, textAlign: 'right', color: 'var(--text-dim)' }}>{a.beatCount}</td>
+                    <td style={{ ...TD, textAlign: 'right' }}>
+                      <span style={{ color: (a.beats7d ?? 0) > 2 ? '#ff8800' : 'var(--text-dim)', fontSize: '11px', fontWeight: (a.beats7d ?? 0) > 2 ? 'bold' : 'normal' }}>
+                        {a.beats7d ?? '—'}
+                      </span>
+                    </td>
                     <td style={{ ...TD, textAlign: 'right', color: 'var(--text-dim)', fontSize: '10px' }}>
                       {fmtNum(a.avgViews ?? 0)}
                     </td>
                     <td style={{ ...TD, textAlign: 'right' }}>
                       <span style={{ color: i === 0 ? 'var(--accent)' : 'var(--text-dim)', fontWeight: i === 0 ? 'bold' : 'normal' }}>
                         {fmtNum(a.totalViews)}
+                      </span>
+                    </td>
+                    <td style={{ ...TD, textAlign: 'right' }}>
+                      <span style={{ color: growthColor, fontSize: '10px', fontWeight: 'bold', fontFamily: 'Courier New, monospace' }}>
+                        {growthLabel}
                       </span>
                     </td>
                     <td style={{ ...TD, paddingLeft: 8 }}>
@@ -259,12 +266,13 @@ function ArtistHub({ artists }: { artists: ArtistTrend[] }) {
                           onMouseEnter={e => { const el = e.currentTarget as HTMLElement; el.style.color = 'var(--accent)'; el.style.borderColor = 'var(--accent-border)' }}
                           onMouseLeave={e => { const el = e.currentTarget as HTMLElement; el.style.color = 'var(--text-dim)'; el.style.borderColor = 'var(--border)' }}
                         >▶ YT</a>
-                        {a.deezerLink && (
-                          <a href={a.deezerLink} target="_blank" rel="noopener noreferrer"
-                            style={{ padding: '3px 7px', border: '1px solid var(--border)', color: 'var(--text-dim)', fontSize: '9px', textDecoration: 'none', letterSpacing: '0.5px' }}
-                            onMouseEnter={e => { const el = e.currentTarget as HTMLElement; el.style.color = '#ff6699'; el.style.borderColor = '#ff669933' }}
+                        {onUseInScheduler && (
+                          <button
+                            onClick={() => onUseInScheduler(a.name)}
+                            style={{ padding: '3px 7px', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-dim)', fontSize: '9px', cursor: 'pointer', letterSpacing: '0.5px', whiteSpace: 'nowrap', fontFamily: 'Courier New, monospace' }}
+                            onMouseEnter={e => { const el = e.currentTarget as HTMLElement; el.style.color = '#00ff00'; el.style.borderColor = '#00ff0044' }}
                             onMouseLeave={e => { const el = e.currentTarget as HTMLElement; el.style.color = 'var(--text-dim)'; el.style.borderColor = 'var(--border)' }}
-                          >DZ</a>
+                          >USAR</button>
                         )}
                       </div>
                     </td>
@@ -464,6 +472,7 @@ export function Overview({
   videos, videosLoading,
   trending, trendingLoading,
   trafficSources,
+  onUseInScheduler,
 }: {
   data: DailyMetric[]
   channelInfo?: ChannelInfo | null
@@ -473,6 +482,7 @@ export function Overview({
   trending?: ArtistTrend[] | null
   trendingLoading?: boolean
   trafficSources?: TrafficSource[] | null
+  onUseInScheduler?: (name: string) => void
 }) {
   const stats = useMemo(() => {
     if (!data.length) return null
@@ -548,7 +558,7 @@ export function Overview({
           {trendingLoading ? (
             <SkeletonTable rows={8} />
           ) : trending && trending.length > 0 ? (
-            <ArtistHub artists={trending} />
+            <ArtistHub artists={trending} onUseInScheduler={onUseInScheduler} />
           ) : (
             <p style={{ color: 'var(--text-faint)', fontSize: '11px', padding: '16px 0', textAlign: 'center' }}>
               *** SEM DADOS — NENHUM TYPE BEAT ENCONTRADO OU INNERTUBE INDISPONÍVEL ***

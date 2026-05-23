@@ -112,6 +112,7 @@ export default function App() {
   const [page, setPage]                         = useState<Page>('overview')
   const [dateRange, setDateRange]               = useState<DateRange>('28d')
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [schedulerPreset, setSchedulerPreset]   = useState<string | undefined>(undefined)
 
   // Auth
   const [authChecked, setAuthChecked]           = useState(false)
@@ -222,6 +223,7 @@ export default function App() {
           trending={trending}
           trendingLoading={trendingLoading}
           trafficSources={trafficSources}
+          onUseInScheduler={(name) => { setSchedulerPreset(name); setPage('scheduler') }}
         />
       case 'videos':
         return <Videos realVideos={videos} loading={videosLoading} />
@@ -232,7 +234,7 @@ export default function App() {
       case 'revenue':
         return <Revenue revenueMonthly={revenueMonthly} revenueIncluded={revenueIncluded} />
       case 'scheduler':
-        return <Scheduler onNavigate={setPage} />
+        return <Scheduler onNavigate={setPage} presetArtist={schedulerPreset} onPresetConsumed={() => setSchedulerPreset(undefined)} />
       case 'beatstore':
         return <BeatStore onNavigate={setPage} />
       case 'settings':

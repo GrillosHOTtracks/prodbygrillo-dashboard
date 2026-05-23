@@ -41,27 +41,26 @@ export type BeatIdea = {
 }
 
 export type ArtistTrend = {
-  name:             string
-  beatCount:        number
-  totalViews:       number
-  avgViews:         number
-  latestBeat:       string
-  // Enriched fields
-  photo?:           string | null
-  deezerFans?:      number
-  deezerLink?:      string | null
-  vibes?:           string[]
+  name:               string
+  beatCount:          number
+  totalViews:         number
+  avgViews:           number
+  latestBeat:         string
+  photo?:             string | null
+  vibes?:             string[]
   demandScore?:       number
   saturation?:        'low' | 'medium' | 'high'
   opportunityScore?:  number
   hotTag?:            string | null
   beatIdea?:          BeatIdea
-  // New enrichment fields
-  spotifyFollowers?:  number
-  spotifyPopularity?: number
-  trendsScore?:       number | null
-  recentBeatsCount?:  number
+  beats7d?:           number
+  beats7_14d?:        number
+  uploadGrowth?:      number
+  viewsGrowth?:       number | null
   newestDaysAgo?:     number | null
+  spotifyPopularity?: number
+  spotifyFollowers?:  number
+  trendsScore?:       number | null
 }
 
 export type OAuthStatus = {

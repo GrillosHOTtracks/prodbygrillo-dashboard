@@ -141,31 +141,45 @@ async function fetchGoogleTrends(keyword) {
   } catch { return null }
 }
 
-// ─── Deezer enrichment ────────────────────────────────────────────────────────
+// ─── Deezer — photo only (no fans displayed) ─────────────────────────────────
 
-async function fetchDeezer(artistName) {
+async function fetchDeezerPhoto(artistName) {
   try {
     const url = `https://api.deezer.com/search/artist?q=${encodeURIComponent(artistName)}&limit=1`
-    const r = await fetch(url, {
-      headers: { 'User-Agent': 'Mozilla/5.0' },
-      signal: AbortSignal.timeout(4000),
-    })
+    const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(4000) })
     if (!r.ok) return null
     const data = await r.json()
     const hit = data?.data?.[0]
     if (!hit) return null
-    const nameLower = artistName.toLowerCase()
-    const hitLower  = (hit.name || '').toLowerCase()
-    // Only accept if name roughly matches (avoid random artist enrichment)
-    if (!hitLower.includes(nameLower.split(' ')[0]) && !nameLower.includes(hitLower.split(' ')[0])) return null
-    return {
-      photo:       hit.picture_medium || null,
-      deezerFans:  hit.nb_fan         || 0,
-      deezerLink:  hit.link           || null,
-    }
-  } catch {
-    return null
-  }
+    const nameLow = artistName.toLowerCase()
+    const hitLow  = (hit.name || '').toLowerCase()
+    if (!hitLow.includes(nameLow.split(' ')[0]) && !nameLow.includes(hitLow.split(' ')[0])) return null
+    return hit.picture_medium || null
+  } catch { return null }
+}
+
+// ─── Views-growth snapshot history ───────────────────────────────────────────
+
+const HISTORY_FILE = path.join(os.tmpdir(), 'trending_history.json')
+
+function loadHistory() {
+  try { if (fs.existsSync(HISTORY_FILE)) return JSON.parse(fs.readFileSync(HISTORY_FILE, 'utf8')) } catch {}
+  return []
+}
+function saveHistory(history) {
+  try { fs.writeFileSync(HISTORY_FILE, JSON.stringify(history)) } catch {}
+}
+function addSnapshot(history, artists) {
+  history.push({ ts: Date.now(), views: Object.fromEntries(artists.map(a => [artistKey(a.name), a.totalViews])) })
+  if (history.length > 336) history.splice(0, history.length - 336)
+}
+function getViewsGrowthPct(history, name, currentViews) {
+  const target = Date.now() - 7 * 24 * 3600 * 1000
+  const snap   = history.find(h => Math.abs(h.ts - target) <= 36 * 3600 * 1000)
+  if (!snap) return null
+  const prev = snap.views[artistKey(name)]
+  if (!prev) return null
+  return Math.round(((currentViews - prev) / prev) * 100)
 }
 
 // ─── Beat ideas per vibe ──────────────────────────────────────────────────────
@@ -201,31 +215,26 @@ function computeScores(artists) {
     const demandScore = Math.round((a.beatCount / 3) * 25 + (a.avgViews / maxAvg) * 75)
     const saturation  = a.beatCount <= 4 ? 'low' : a.beatCount <= 14 ? 'medium' : 'high'
 
-    // Popularity signal: Deezer fans + Spotify followers blended
-    const deezerMil  = (a.deezerFans || 0) / 1e6
-    const spotMil    = (a.spotifyFollowers || 0) / 1e6
-    const popularityMil = deezerMil > 0 && spotMil > 0
-      ? deezerMil * 0.5 + spotMil * 0.5
-      : Math.max(deezerMil, spotMil, (a.spotifyPopularity || 0) / 50)
+    // Popularity: Spotify 0-100 or normalised avg views as fallback
+    const popularity = a.spotifyPopularity != null
+      ? a.spotifyPopularity / 100
+      : Math.min(1, a.avgViews / maxAvg)
 
-    // Penalise recent saturation: beats in last 30 days count double
-    const recentW = (a.recentBeatsCount || 0)
-    const adjBeatCount = a.beatCount + recentW
+    // Market space: fewer beats = more room (penalise beats this week double)
+    const adjBeatCount = a.beatCount + (a.beats7d || 0)
+    const marketSpace  = Math.max(0, 1 - adjBeatCount / 20)
 
-    // Trends boost: Google Trends score 0-100 adds up to +15 pts
-    const trendsBoost = a.trendsScore != null ? Math.round((a.trendsScore / 100) * 15) : 0
+    // Google Trends boost (0-1)
+    const trendsBoost = (a.trendsScore ?? 0) / 100
 
-    const oppRaw = popularityMil > 0
-      ? Math.round(popularityMil * 15 / Math.sqrt(adjBeatCount + 1) + trendsBoost + 20)
-      : Math.max(0, 60 - adjBeatCount * 4 + trendsBoost)
+    const oppRaw = Math.round(popularity * 40 + marketSpace * 35 + trendsBoost * 15 + 10)
     const opportunityScore = Math.min(100, Math.max(0, oppRaw))
 
-    const fans = a.deezerFans || 0
     let hotTag = null
-    if (demandScore >= 85)                         hotTag = '🔥 VIRAL'
-    else if (popularityMil >= 5 && oppRaw >= 60)  hotTag = '💎 OPORTUNIDADE'
-    else if (a.beatCount <= 4)                    hotTag = '⬆ SUBINDO'
-    else if (saturation === 'high')               hotTag = '⚠ SATURADO'
+    if (demandScore >= 85)                              hotTag = '🔥 VIRAL'
+    else if (opportunityScore >= 70 && popularity >= 0.6) hotTag = '💎 OPORTUNIDADE'
+    else if (a.beatCount <= 4)                         hotTag = '⬆ SUBINDO'
+    else if (saturation === 'high')                    hotTag = '⚠ SATURADO'
 
     return { ...a, demandScore: Math.min(100, demandScore), saturation, opportunityScore, hotTag }
   })
@@ -277,14 +286,15 @@ router.get('/', async (req, res) => {
       if (!artist) continue
       const key = artistKey(artist)
       if (!artistMap[key]) {
-        artistMap[key] = { name: artist, beatCount: 0, totalViews: 0, avgViews: 0, latestBeat: '', titles: [], photo: null, deezerFans: 0, deezerLink: null, recentBeatsCount: 0, newestDaysAgo: null }
+        artistMap[key] = { name: artist, beatCount: 0, totalViews: 0, avgViews: 0, latestBeat: '', titles: [], photo: null, beats7d: 0, beats7_14d: 0, newestDaysAgo: null }
       }
       artistMap[key].beatCount++
       artistMap[key].totalViews += item.views
       artistMap[key].titles.push(decodeHtml(item.title))
       if (!artistMap[key].latestBeat) artistMap[key].latestBeat = decodeHtml(item.title)
       if (item.daysAgo !== null && item.daysAgo !== undefined) {
-        if (item.daysAgo <= 30) artistMap[key].recentBeatsCount++
+        if (item.daysAgo <= 7)  artistMap[key].beats7d++
+        else if (item.daysAgo <= 14) artistMap[key].beats7_14d++
         if (artistMap[key].newestDaysAgo === null || item.daysAgo < artistMap[key].newestDaysAgo) {
           artistMap[key].newestDaysAgo = item.daysAgo
         }
@@ -302,16 +312,14 @@ router.get('/', async (req, res) => {
       .sort((a, b) => b.totalViews - a.totalViews)
       .slice(0, 15)
 
-    // Deezer enrichment — parallel, 4s timeout each
+    // Deezer photo enrichment (parallel)
     await Promise.all(sorted.map(async (a) => {
-      const dz = await fetchDeezer(a.name)
-      if (dz) { a.photo = dz.photo; a.deezerFans = dz.deezerFans; a.deezerLink = dz.deezerLink }
+      const photo = await fetchDeezerPhoto(a.name)
+      if (photo) a.photo = photo
     }))
 
     // Spotify + Google Trends — top 8 only to avoid rate limits
-    const top8 = sorted.slice(0, 8)
-    await Promise.all(top8.map(async (a, i) => {
-      // Small stagger to avoid bursting Google Trends
+    await Promise.all(sorted.slice(0, 8).map(async (a, i) => {
       if (i > 0) await new Promise(r => setTimeout(r, i * 600))
       const [sp, gt] = await Promise.allSettled([fetchSpotify(a.name), fetchGoogleTrends(a.name)])
       if (sp.status === 'fulfilled' && sp.value) {
@@ -321,7 +329,24 @@ router.get('/', async (req, res) => {
       if (gt.status === 'fulfilled' && gt.value !== null) a.trendsScore = gt.value
     }))
 
-    // Add beatIdea + scores, strip internal titles array
+    // Upload frequency growth (always available)
+    sorted = sorted.map(a => ({
+      ...a,
+      uploadGrowth: a.beats7_14d > 0
+        ? Math.round(((a.beats7d - a.beats7_14d) / a.beats7_14d) * 100)
+        : a.beats7d > 0 ? 100 : 0,
+    }))
+
+    // Views growth from 7-day snapshot history
+    const history = loadHistory()
+    sorted = sorted.map(a => ({
+      ...a,
+      viewsGrowth: getViewsGrowthPct(history, a.name, a.totalViews),
+    }))
+    addSnapshot(history, sorted)
+    saveHistory(history)
+
+    // Scores + beat ideas, strip internal titles array
     sorted = computeScores(sorted).map(({ titles: _, ...a }) => ({
       ...a,
       beatIdea: getBeatIdea(a.vibes),
