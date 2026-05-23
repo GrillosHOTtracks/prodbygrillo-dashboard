@@ -557,7 +557,7 @@ function CardLAIS({ data, loading, marketData, onSchedule, schedulerUsed, onSche
   onSchedulerReset?: () => void
 }) {
   const [btnHover, setBtnHover] = useState(false)
-  const [resetHover, setResetHover] = useState(false)
+  const [refreshHover, setRefreshHover] = useState(false)
 
   if (loading && !data) return (
     <div style={card}>
@@ -601,7 +601,21 @@ function CardLAIS({ data, loading, marketData, onSchedule, schedulerUsed, onSche
 
       {/* ⚡ FAZER AGORA */}
       <div style={{ padding: '12px', backgroundColor: '#0a0a0a', border: '1px solid var(--border)' }}>
-        <p style={{ ...lbl, color: '#ffcc00', marginBottom: 6 }}>⚡ FAZER AGORA</p>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+          <p style={{ ...lbl, color: '#ffcc00', margin: 0 }}>⚡ FAZER AGORA</p>
+          <button
+            onClick={() => { onSchedulerReset?.() }}
+            onMouseEnter={() => setRefreshHover(true)}
+            onMouseLeave={() => setRefreshHover(false)}
+            title="Gerar nova sugestão"
+            style={{
+              background: 'transparent', border: 'none', padding: '0 2px',
+              color: refreshHover ? '#ffcc00' : 'var(--text-faint)',
+              fontSize: '13px', cursor: 'pointer', lineHeight: 1,
+              transition: 'color 0.12s',
+            }}
+          >↻</button>
+        </div>
         <p style={{ color: '#00ff00', fontSize: '11px', margin: '0 0 4px', fontStyle: 'italic' }}>
           "{data.fazerAgora.titulo}"
         </p>
@@ -611,20 +625,7 @@ function CardLAIS({ data, loading, marketData, onSchedule, schedulerUsed, onSche
         </p>
         {onSchedule && (
           schedulerUsed ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ color: '#00ff00', fontSize: '10px', letterSpacing: '1px' }}>✓ CRIADO HOJE</span>
-              <button
-                onClick={onSchedulerReset}
-                onMouseEnter={() => setResetHover(true)}
-                onMouseLeave={() => setResetHover(false)}
-                style={{
-                  background: 'transparent', border: 'none',
-                  color: resetHover ? 'var(--text-dim)' : 'var(--text-faint)',
-                  fontSize: '9px', cursor: 'pointer', fontFamily: 'Courier New, monospace',
-                  letterSpacing: '1px', textDecoration: 'underline', padding: 0,
-                }}
-              >[ criar outro ]</button>
-            </div>
+            <span style={{ color: '#00ff00', fontSize: '10px', letterSpacing: '1px' }}>✓ CRIADO HOJE</span>
           ) : (
             <button
               onClick={() => {
@@ -855,15 +856,20 @@ export function Market({ onNavigate: _onNavigate, onUseInScheduler }: {
 
   useEffect(() => { load() }, [])
 
+  const refreshLAIS = (d: MarketData) => {
+    setLaisLoading(true)
+    setLaisData(null)
+    fetchLAIS(d)
+      .then(setLaisData)
+      .catch(() => setLaisData(null))
+      .finally(() => setLaisLoading(false))
+  }
+
   useEffect(() => {
     if (!data || !data.niches.some(n => n.total > 0)) return
 
     // LAIS analysis
-    setLaisLoading(true)
-    fetchLAIS(data)
-      .then(setLaisData)
-      .catch(() => setLaisData(null))
-      .finally(() => setLaisLoading(false))
+    refreshLAIS(data)
 
     // Comment insights — top 5 videos by views across all niches
     const topVideoIds = data.niches
@@ -954,6 +960,7 @@ export function Market({ onNavigate: _onNavigate, onUseInScheduler }: {
               onSchedulerReset={() => {
                 localStorage.removeItem(todayKey())
                 setSchedulerUsed(false)
+                if (data) refreshLAIS(data)
               }}
             />
             <CardChannels channels={data.channels ?? []} />
