@@ -90,12 +90,12 @@ async function run() {
 
     // 1. Trending artists
     const tData = await fetchJson(`${baseUrl}/api/trending`)
-    const artists = (Array.isArray(tData) ? tData : []).map(a => a.name).filter(Boolean).slice(0, 5)
+    const artists = (Array.isArray(tData) ? tData : []).map(a => a.name).filter(Boolean).slice(0, 10)
     if (!artists.length) throw new Error('Sem artistas em trending')
     console.log('[AUTO-COMMENT] Artists:', artists.join(', '))
 
-    // 2. Artist videos
-    const avData = await fetchJson(`${baseUrl}/api/trending/artist-videos?artists=${encodeURIComponent(artists.join(','))}`)
+    // 2. Artist videos — 2 per artist = up to 20 per run
+    const avData = await fetchJson(`${baseUrl}/api/trending/artist-videos?artists=${encodeURIComponent(artists.join(','))}&perArtist=2`)
     const videos = (avData.videos || []).filter(v => v.videoId && !postedToday.includes(v.videoId))
     if (!videos.length) { console.log('[AUTO-COMMENT] All videos already commented today'); running = false; lastResult = { status: 'done', date: today, posted: 0, message: 'Já comentado hoje' }; return }
     console.log('[AUTO-COMMENT] Videos to comment:', videos.length)
@@ -129,7 +129,7 @@ Reply ONLY in valid JSON (no markdown, no text before or after):
 
     const resp = await groq.chat.completions.create({
       model: 'llama-3.3-70b-versatile',
-      max_tokens: 1200,
+      max_tokens: 2400,
       messages: [{ role: 'user', content: prompt }],
     })
     const raw = resp.choices[0]?.message?.content || ''

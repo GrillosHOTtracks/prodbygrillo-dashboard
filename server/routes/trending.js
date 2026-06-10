@@ -364,4 +364,25 @@ router.get('/', async (req, res) => {
   }
 })
 
+// ─── GET /artist-videos — top video for each artist (for engagement queue) ───
+router.get('/artist-videos', async (req, res) => {
+  const perArtist = Math.min(parseInt(req.query.perArtist || '2', 10), 5)
+  const artists   = (req.query.artists || '').split(',').map(s => s.trim()).filter(Boolean).slice(0, 10)
+  if (!artists.length) return res.json({ videos: [] })
+
+  const settled = await Promise.allSettled(artists.map(async artist => {
+    const vids = await search(`${artist} official music video`)
+    const matches = vids
+      .filter(v => v.videoId && !/type[\s-]?beat/i.test(v.title))
+      .slice(0, perArtist)
+    return matches.map(v => ({ artist, videoId: v.videoId, title: v.title, channel: '' }))
+  }))
+
+  const videos = settled
+    .filter(r => r.status === 'fulfilled' && r.value)
+    .flatMap(r => r.value)
+
+  res.json({ videos })
+})
+
 module.exports = router

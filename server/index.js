@@ -7,7 +7,7 @@ console.log('[SERVER] Node:', process.version, '| PORT env:', process.env.PORT)
 
 let authRoutes, accountsRoutes, channelRoutes, analyticsRoutes,
     videosRoutes, audienceRoutes, trendingRoutes, marketRoutes, aiRoutes, uploadRoutes, scheduleRoutes,
-    accountManager, dashboardAuth, autoShorts, autoComments, autoReplies
+    accountManager, dashboardAuth, autoShorts, autoComments, autoReplies, autoPlaylists, autoSEO
 
 try {
   authRoutes      = require('./routes/auth')
@@ -26,6 +26,8 @@ try {
   autoShorts      = require('./autoShorts')
   autoComments    = require('./autoComments')
   autoReplies     = require('./autoReplies')
+  autoPlaylists   = require('./autoPlaylists')
+  autoSEO         = require('./autoSEO')
   console.log('[SERVER] All modules loaded OK')
 } catch (err) {
   console.error('[SERVER] Module load error:', err.message)
@@ -77,8 +79,12 @@ app.use('/api/upload',    requireAuth, uploadRoutes)
 app.use('/api/schedule',  scheduleRoutes)
 app.get('/api/plan/comments-status', requireAuth, (_req, res) => res.json(autoComments.getStatus()))
 app.post('/api/plan/run-comments',   requireAuth, (_req, res) => { autoComments.runNow(); res.json({ ok: true }) })
-app.get('/api/plan/replies-status',  requireAuth, (_req, res) => res.json(autoReplies.getStatus()))
-app.post('/api/plan/run-replies',    requireAuth, (_req, res) => { autoReplies.runNow(); res.json({ ok: true }) })
+app.get('/api/plan/replies-status',    requireAuth, (_req, res) => res.json(autoReplies.getStatus()))
+app.post('/api/plan/run-replies',      requireAuth, (_req, res) => { autoReplies.runNow(); res.json({ ok: true }) })
+app.get('/api/plan/playlists-status',  requireAuth, (_req, res) => res.json(autoPlaylists.getStatus()))
+app.post('/api/plan/run-playlists',    requireAuth, (_req, res) => { autoPlaylists.scanAll(); res.json({ ok: true }) })
+app.get('/api/plan/seo-status',        requireAuth, (_req, res) => res.json(autoSEO.getStatus()))
+app.post('/api/plan/run-seo',          requireAuth, (_req, res) => { autoSEO.runNow(); res.json({ ok: true }) })
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true, authenticated: accountManager.isAuthenticated(), ts: new Date().toISOString() })
 })
@@ -138,6 +144,8 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   autoShorts.start(accountManager)
   autoComments.start(accountManager, PORT)
   autoReplies.start(accountManager)
+  autoPlaylists.start(accountManager)
+  autoSEO.start(accountManager, PORT)
 })
 
 server.on('error', (err) => {

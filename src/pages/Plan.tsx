@@ -157,6 +157,8 @@ export function Plan({ channelInfo, analyticsData, videos, onNavigate }: PlanPro
 
   const [autoComStatus, setAutoComStatus]     = useState<any>(null)
   const [autoRepStatus, setAutoRepStatus]     = useState<any>(null)
+  const [autoPlStatus,  setAutoPlStatus]      = useState<any>(null)
+  const [autoSeoStatus, setAutoSeoStatus]     = useState<any>(null)
   const [comExpanded, setComExpanded]         = useState(false)
   const [repExpanded, setRepExpanded]         = useState(false)
 
@@ -164,35 +166,41 @@ export function Plan({ channelInfo, analyticsData, videos, onNavigate }: PlanPro
     if (ms <= 0) return '—'
     const h = Math.floor(ms / 3600000)
     const m = Math.floor((ms % 3600000) / 60000)
+    const d = Math.floor(h / 24)
+    if (d > 0) return `${d}d ${(h % 24)}h`
     return h > 0 ? `${h}h ${m.toString().padStart(2, '0')}m` : `${m}m`
   }
 
-  function loadAutoComStatus() {
-    fetch('/api/plan/comments-status')
-      .then(r => r.ok ? r.json() : null)
-      .then(d => { if (d) setAutoComStatus(d) })
-      .catch(() => {})
+  function loadAllEngineStatus() {
+    const apis = [
+      ['/api/plan/comments-status',  setAutoComStatus],
+      ['/api/plan/replies-status',   setAutoRepStatus],
+      ['/api/plan/playlists-status', setAutoPlStatus],
+      ['/api/plan/seo-status',       setAutoSeoStatus],
+    ] as const
+    apis.forEach(([url, setter]) => {
+      fetch(url).then(r => r.ok ? r.json() : null).then(d => { if (d) setter(d) }).catch(() => {})
+    })
   }
 
-  function loadAutoRepStatus() {
-    fetch('/api/plan/replies-status')
-      .then(r => r.ok ? r.json() : null)
-      .then(d => { if (d) setAutoRepStatus(d) })
-      .catch(() => {})
-  }
+  function loadAutoComStatus() { fetch('/api/plan/comments-status').then(r => r.ok ? r.json() : null).then(d => { if (d) setAutoComStatus(d) }).catch(() => {}) }
+  function loadAutoRepStatus() { fetch('/api/plan/replies-status').then(r => r.ok ? r.json() : null).then(d => { if (d) setAutoRepStatus(d) }).catch(() => {}) }
 
   function runComNow() {
     setAutoComStatus((s: any) => s ? { ...s, running: true } : s)
-    fetch('/api/plan/run-comments', { method: 'POST' })
-      .then(() => setTimeout(loadAutoComStatus, 1500))
-      .catch(() => {})
+    fetch('/api/plan/run-comments', { method: 'POST' }).then(() => setTimeout(loadAutoComStatus, 1500)).catch(() => {})
   }
-
   function runRepNow() {
     setAutoRepStatus((s: any) => s ? { ...s, running: true } : s)
-    fetch('/api/plan/run-replies', { method: 'POST' })
-      .then(() => setTimeout(loadAutoRepStatus, 1500))
-      .catch(() => {})
+    fetch('/api/plan/run-replies', { method: 'POST' }).then(() => setTimeout(loadAutoRepStatus, 1500)).catch(() => {})
+  }
+  function runPlNow() {
+    setAutoPlStatus((s: any) => s ? { ...s, running: true } : s)
+    fetch('/api/plan/run-playlists', { method: 'POST' }).then(() => setTimeout(() => fetch('/api/plan/playlists-status').then(r => r.json()).then(setAutoPlStatus), 2000)).catch(() => {})
+  }
+  function runSeoNow() {
+    setAutoSeoStatus((s: any) => s ? { ...s, running: true } : s)
+    fetch('/api/plan/run-seo', { method: 'POST' }).then(() => setTimeout(() => fetch('/api/plan/seo-status').then(r => r.json()).then(setAutoSeoStatus), 2000)).catch(() => {})
   }
 
   const today = todayStr()
@@ -396,22 +404,15 @@ REGRAS: máximo 7 itens · IDs únicos em kebab-case sem repetir os de ontem · 
   useEffect(() => {
     if (!localStorage.getItem(`plan_${today}`))       fetchPlan()
     if (!localStorage.getItem(`engagement_${today}`)) fetchEngagement()
-    loadAutoComStatus()
-    loadAutoRepStatus()
+    loadAllEngineStatus()
   }, []) // eslint-disable-line
 
   // ── Poll auto-comment status — fast when running, slow when idle ───────────
+  const anyRunning = autoComStatus?.running || autoRepStatus?.running || autoPlStatus?.running || autoSeoStatus?.running
   useEffect(() => {
-    const interval = autoComStatus?.running ? 3000 : 30000
-    const iv = setInterval(loadAutoComStatus, interval)
+    const iv = setInterval(loadAllEngineStatus, anyRunning ? 3000 : 30000)
     return () => clearInterval(iv)
-  }, [autoComStatus?.running])
-
-  useEffect(() => {
-    const interval = autoRepStatus?.running ? 3000 : 30000
-    const iv = setInterval(loadAutoRepStatus, interval)
-    return () => clearInterval(iv)
-  }, [autoRepStatus?.running])
+  }, [anyRunning])
 
   // ── Midnight regeneration ──────────────────────────────────────────────────
   useEffect(() => {
@@ -580,6 +581,108 @@ REGRAS: máximo 7 itens · IDs únicos em kebab-case sem repetir os de ontem · 
           </div>
         </>
       )}
+
+      {/* ══════════════════════════════════════════════════════════
+          ALGORITHM ENGINE — todos os jobs automáticos
+      ══════════════════════════════════════════════════════════ */}
+      <div style={{ ...panel, borderTopColor: '#00ff00', borderLeftColor: '#00ff00' }}>
+        <p style={{ ...dim, marginBottom: '12px', color: '#00aa00' }}>⚡ ALGORITHM ENGINE · jobs automáticos</p>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+
+          {/* SHORTS */}
+          <div style={{ padding: '10px', backgroundColor: '#080808', border: '1px solid #1a1a1a' }}>
+            <p style={{ ...dim, margin: '0 0 6px' }}>🎬 AUTO-SHORTS</p>
+            <p style={{ color: '#c0c0c0', fontSize: '11px', margin: '0 0 4px' }}>corta + publica · a cada 2h</p>
+            <p style={{ color: '#00aa00', fontSize: '10px', margin: 0 }}>pendentes: 11 · público imediato</p>
+          </div>
+
+          {/* COMMENTS */}
+          <div style={{ padding: '10px', backgroundColor: '#080808', border: '1px solid #1a1a1a' }}>
+            <p style={{ ...dim, margin: '0 0 6px' }}>💬 AUTO-COMMENTS + LIKES</p>
+            <p style={{ color: '#c0c0c0', fontSize: '11px', margin: '0 0 4px' }}>
+              {autoComStatus?.running ? <span style={{ color: '#ffaa00' }}>● a comentar...</span>
+                : `${autoComStatus?.todayPosted ?? 0} hoje · próx. ${fmtCountdown(autoComStatus?.msUntilNext ?? 0)}`}
+            </p>
+            <p style={{ color: '#2a4a2a', fontSize: '9px', margin: '0 0 6px' }}>00:00 · 13:00 · 17:00 · 21:00 UTC</p>
+            <button onClick={runComNow} disabled={autoComStatus?.running}
+              style={{ ...retroBtn, fontSize: '9px', padding: '2px 8px', opacity: autoComStatus?.running ? 0.4 : 1 }}
+              onMouseEnter={e => { if (!autoComStatus?.running) (e.currentTarget as HTMLElement).style.color = '#00aa00' }}
+              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = '#555555' }}>
+              [ RUN ]
+            </button>
+          </div>
+
+          {/* REPLIES */}
+          <div style={{ padding: '10px', backgroundColor: '#080808', border: '1px solid #1a1a1a' }}>
+            <p style={{ ...dim, margin: '0 0 6px' }}>🔁 AUTO-REPLIES</p>
+            <p style={{ color: '#c0c0c0', fontSize: '11px', margin: '0 0 4px' }}>
+              {autoRepStatus?.running ? <span style={{ color: '#ffaa00' }}>● a responder...</span>
+                : `${autoRepStatus?.todayReplied ?? 0} hoje · ${autoRepStatus?.totalReplied ?? 0} total`}
+            </p>
+            <p style={{ color: '#2a4a2a', fontSize: '9px', margin: '0 0 6px' }}>responde comentários nos teus vídeos · 2h</p>
+            <button onClick={runRepNow} disabled={autoRepStatus?.running}
+              style={{ ...retroBtn, fontSize: '9px', padding: '2px 8px', opacity: autoRepStatus?.running ? 0.4 : 1 }}
+              onMouseEnter={e => { if (!autoRepStatus?.running) (e.currentTarget as HTMLElement).style.color = '#00aa00' }}
+              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = '#555555' }}>
+              [ RUN ]
+            </button>
+          </div>
+
+          {/* PLAYLISTS */}
+          <div style={{ padding: '10px', backgroundColor: '#080808', border: '1px solid #1a1a1a' }}>
+            <p style={{ ...dim, margin: '0 0 6px' }}>📂 AUTO-PLAYLISTS</p>
+            <p style={{ color: '#c0c0c0', fontSize: '11px', margin: '0 0 4px' }}>
+              {autoPlStatus?.running ? <span style={{ color: '#ffaa00' }}>● a organizar...</span>
+                : `${autoPlStatus?.playlistCount ?? 0} playlists · scan no arranque`}
+            </p>
+            <p style={{ color: '#2a4a2a', fontSize: '9px', margin: '0 0 6px' }}>
+              {autoPlStatus?.playlists ? Object.keys(autoPlStatus.playlists).join(' · ') : 'Trap · Drill · Melodic · Phonk...'}
+            </p>
+            <button onClick={runPlNow} disabled={autoPlStatus?.running}
+              style={{ ...retroBtn, fontSize: '9px', padding: '2px 8px', opacity: autoPlStatus?.running ? 0.4 : 1 }}
+              onMouseEnter={e => { if (!autoPlStatus?.running) (e.currentTarget as HTMLElement).style.color = '#00aa00' }}
+              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = '#555555' }}>
+              [ SCAN ]
+            </button>
+          </div>
+
+          {/* SEO */}
+          <div style={{ padding: '10px', backgroundColor: '#080808', border: '1px solid #1a1a1a', gridColumn: '1 / -1' }}>
+            <p style={{ ...dim, margin: '0 0 6px' }}>🔍 AUTO-SEO · tags + descrições com artistas trending</p>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+              <div>
+                <p style={{ color: '#c0c0c0', fontSize: '11px', margin: '0 0 3px' }}>
+                  {autoSeoStatus?.running ? <span style={{ color: '#ffaa00' }}>● a atualizar SEO...</span>
+                    : `${autoSeoStatus?.totalUpdated ?? 0} vídeos atualizados · próx. ${fmtCountdown(autoSeoStatus?.msUntilNext ?? 0)}`}
+                </p>
+                {autoSeoStatus?.trendingUsed?.length > 0 && (
+                  <p style={{ color: '#2a4a2a', fontSize: '9px', margin: 0 }}>
+                    última run: {autoSeoStatus.trendingUsed.slice(0, 5).join(', ')}
+                  </p>
+                )}
+                {autoSeoStatus?.lastResult?.status === 'error' && (
+                  <p style={{ color: '#ff4400', fontSize: '9px', margin: 0 }}>ERRO: {autoSeoStatus.lastResult.error}</p>
+                )}
+              </div>
+              <button onClick={runSeoNow} disabled={autoSeoStatus?.running}
+                style={{ ...retroBtn, opacity: autoSeoStatus?.running ? 0.4 : 1 }}
+                onMouseEnter={e => { if (!autoSeoStatus?.running) { (e.currentTarget as HTMLElement).style.borderColor = '#00aa00'; (e.currentTarget as HTMLElement).style.color = '#00aa00' } }}
+                onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = '#2a2a2a'; (e.currentTarget as HTMLElement).style.color = '#555555' }}>
+                {autoSeoStatus?.running ? '[ A ATUALIZAR... ]' : '[ ATUALIZAR SEO AGORA ]'}
+              </button>
+            </div>
+          </div>
+
+          {/* FIRST-HOUR BURST */}
+          <div style={{ padding: '10px', backgroundColor: '#080808', border: '1px solid #1a1a1a', gridColumn: '1 / -1' }}>
+            <p style={{ ...dim, margin: '0 0 4px' }}>🚀 FIRST-HOUR BURST · ativado automaticamente em cada upload</p>
+            <p style={{ color: '#444444', fontSize: '10px', margin: 0 }}>
+              5min após upload → engagement comment (AI) + comentários trending + replies · auto-playlist
+            </p>
+          </div>
+
+        </div>
+      </div>
 
       {/* ══════════════════════════════════════════════════════════
           FILA DE ENGAJAMENTO

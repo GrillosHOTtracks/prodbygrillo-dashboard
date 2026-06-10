@@ -11,6 +11,9 @@ const { google }        = require('googleapis')
 const Groq              = require('groq-sdk')
 const accountManager    = require('../accountManager')
 const { isQuotaError }  = require('../apiError')
+const autoPlaylists     = require('../autoPlaylists')
+const autoReplies       = require('../autoReplies')
+const autoComments      = require('../autoComments')
 
 const router   = express.Router()
 const TMP_DIR  = path.join(__dirname, '../tmp')
@@ -274,6 +277,16 @@ Reply with ONLY the comment text, nothing else.`,
     } catch (engErr) {
       console.warn('[UPLOAD] Engagement comment failed:', engErr.message)
     }
+
+    // ── Auto-playlist — add to correct style playlist ─────────────────────
+    autoPlaylists.organiseVideo(videoId, meta.title || 'Type Beat').catch(() => {})
+
+    // ── First-hour burst — trigger replies + comments immediately ──────────
+    setTimeout(() => {
+      console.log('[UPLOAD] First-hour burst triggered for', videoId)
+      autoReplies.runNow().catch(() => {})
+      autoComments.runNow().catch(() => {})
+    }, 5 * 60 * 1000) // 5 min after upload completes
 
     // ── Short upload (optional) ────────────────────────────────────────────
     console.log('[UPLOAD] publishShort:', meta.publishShort)
