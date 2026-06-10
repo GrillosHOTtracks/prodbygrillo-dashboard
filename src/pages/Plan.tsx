@@ -20,7 +20,6 @@ interface CheckItem {
 interface PlanData {
   date: string
   dayContext: string
-  mainTask: { text: string; page?: Page }
   checklist: CheckItem[]
   insights: string[]
   weeklyGoal: { subsProgress: number; subsTarget: number; watchMinutes: number; watchTarget: number }
@@ -70,12 +69,7 @@ const retroBtn: React.CSSProperties = {
   fontFamily: S.mono, letterSpacing: '1px', whiteSpace: 'nowrap',
 }
 
-const VALID_PAGES: Page[] = ['overview', 'videos', 'analytics', 'audience', 'revenue', 'plan', 'scheduler', 'settings']
 const DAYS_PT = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado']
-
-function sanitizePage(p: unknown): Page | undefined {
-  return VALID_PAGES.includes(p as Page) ? (p as Page) : undefined
-}
 function todayStr() { return new Date().toISOString().slice(0, 10) }
 
 const PLAN_SYSTEM_PROMPT = `Você é um estrategista de crescimento do YouTube especializado no nicho de produtores musicais, beatmakers e venda de beats (Type Beats). Seu objetivo é transformar o canal prodbygrillo em uma máquina de visualizações, inscritos e vendas de beats via BeatStars.
@@ -214,7 +208,6 @@ export function Plan({ channelInfo, analyticsData, videos, onNavigate }: PlanPro
   const [plan, setPlan]       = useState<PlanData | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError]     = useState('')
-  const [checks, setChecks]   = useState<Record<string, boolean>>({}) // kept for localStorage compat
 
   const [engagement, setEngagement] = useState<EngagementItem[] | null>(null)
   const [engLoading, setEngLoading] = useState(false)
@@ -227,6 +220,7 @@ export function Plan({ channelInfo, analyticsData, videos, onNavigate }: PlanPro
   const [autoSeoStatus, setAutoSeoStatus] = useState<any>(null)
   const [comExpanded, setComExpanded]     = useState(false)
   const [repExpanded, setRepExpanded]     = useState(false)
+  const [engineExpanded, setEngineExpanded] = useState(false)
 
   function fmtCountdown(ms: number) {
     if (!ms || ms <= 0) return '—'
@@ -272,9 +266,8 @@ export function Plan({ channelInfo, analyticsData, videos, onNavigate }: PlanPro
   const today = todayStr()
 
   useEffect(() => {
-    try { const s = localStorage.getItem(`plan_${today}`);        if (s) setPlan(JSON.parse(s)) } catch {}
-    try { const s = localStorage.getItem(`plan_checks_${today}`); if (s) setChecks(JSON.parse(s)) } catch {}
-    try { const s = localStorage.getItem(`engagement_${today}`);  if (s) setEngagement(JSON.parse(s)) } catch {}
+    try { const s = localStorage.getItem(`plan_${today}`);       if (s) setPlan(JSON.parse(s)) } catch {}
+    try { const s = localStorage.getItem(`engagement_${today}`); if (s) setEngagement(JSON.parse(s)) } catch {}
     try { const s = localStorage.getItem(`eng_done_${today}`);    if (s) setEngDone(JSON.parse(s)) } catch {}
   }, [today])
 
@@ -285,13 +278,7 @@ export function Plan({ channelInfo, analyticsData, videos, onNavigate }: PlanPro
       return next
     })
   }
-  function toggleCheck(id: string) {
-    setChecks(prev => {
-      const next = { ...prev, [id]: !prev[id] }
-      localStorage.setItem(`plan_checks_${today}`, JSON.stringify(next))
-      return next
-    })
-  }
+
 
   const fetchEngagement = useCallback(async (bust = false) => {
     if (engLoading) return
@@ -392,16 +379,13 @@ PILARES DE CRESCIMENTO — CANAIS DE BEATS 2026 (roda de forma diferente cada di
 ⑦ MONETIZAÇÃO — link BeatStars na bio, pricing visível, teaser de exclusivo
 ⑧ COMUNIDADE — community post, collab com outro produtor, responder DMs
 
-Gera o plano do dia. Os itens do checklist devem ser ESPECÍFICOS e ACIONÁVEIS para este canal, não genéricos.
+Gera os insights estratégicos do dia para o canal. Foca em observações que o produtor NÃO consegue ver sozinho — padrões, oportunidades de nicho, timing de tendências.
 Responde APENAS em JSON válido (sem markdown, sem texto antes ou depois):
 {
-  "dayContext": "1 frase sobre hoje — ex: Sexta à noite é peak de plays em trap. Canal parado há X dias.",
-  "mainTask": { "text": "tarefa de maior impacto para hoje (específica, com números)", "page": "scheduler" },
-  "checklist": [
-    { "id": "slug-kebab-unico", "text": "tarefa acionável e específica", "page": "videos" }
-  ],
+  "dayContext": "1 frase sobre hoje — contexto de mercado, ex: Terça à tarde tem peak de pesquisa de beats trap. Artistas X e Y em alta.",
+  "checklist": [],
   "insights": [
-    "insight 1 com dado concreto",
+    "insight 1 com dado concreto e ação específica",
     "insight 2",
     "insight 3"
   ],
@@ -412,14 +396,10 @@ Responde APENAS em JSON válido (sem markdown, sem texto antes ou depois):
     "watchTarget": 240000
   }
 }
-REGRAS: máximo 7 itens · IDs únicos em kebab-case sem repetir os de ontem · page deve ser um dos valores válidos ou null · português de Portugal · se dias sem upload > 7, tarefa principal é OBRIGATORIAMENTE fazer upload`
+REGRAS: checklist deve ser array vazio [] · insights máximo 3 · português de Portugal · cada insight deve ter um dado concreto e uma ação específica · foca em SEO, trending artists, CTR e timing`
     try {
       const full   = await laisChat(question, 2048, PLAN_SYSTEM_PROMPT)
       const parsed = extractJson(full) as PlanData
-      if (parsed.mainTask?.page) parsed.mainTask.page = sanitizePage(parsed.mainTask.page)
-      if (Array.isArray(parsed.checklist)) {
-        parsed.checklist = parsed.checklist.map(item => ({ ...item, page: sanitizePage(item.page) }))
-      }
       parsed.date = today
       setPlan(parsed)
       localStorage.setItem(`plan_${today}`, JSON.stringify(parsed))
@@ -446,14 +426,12 @@ REGRAS: máximo 7 itens · IDs únicos em kebab-case sem repetir os de ontem · 
     const now = new Date()
     const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
     const tid = setTimeout(() => {
-      setPlan(null); setChecks({}); fetchPlan()
+      setPlan(null); fetchPlan()
       setEngagement(null); setEngDone({}); fetchEngagement()
     }, tomorrow.getTime() - now.getTime())
     return () => clearTimeout(tid)
   }, []) // eslint-disable-line
 
-  const doneCount  = plan?.checklist.filter(i => checks[i.id]).length ?? 0
-  const totalCount = plan?.checklist.length ?? 0
 
   const jobPostedIds = new Set<string>(
     (autoComStatus?.todayEntries ?? []).map((e: any) => e.videoId)
@@ -496,7 +474,17 @@ REGRAS: máximo 7 itens · IDs únicos em kebab-case sem repetir os de ontem · 
         <div style={{ padding: '8px 14px 6px', display: 'flex', alignItems: 'center', gap: '8px', borderBottom: `1px solid ${S.border}` }}>
           <span style={{ color: S.greenD, fontSize: '9px', letterSpacing: '2px' }}>⚡ ALGORITHM ENGINE</span>
           {anyRunning && <span style={{ color: S.yellow, fontSize: '9px' }} className="blink">● A CORRER</span>}
-          <span style={{ color: S.dimmer, fontSize: '9px', marginLeft: 'auto' }}>5 jobs automáticos activos</span>
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <span style={{ color: S.dimmer, fontSize: '9px' }}>5 jobs activos</span>
+            <button
+              onClick={() => setEngineExpanded(x => !x)}
+              style={{ ...retroBtn, fontSize: '9px', padding: '2px 10px' }}
+              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = S.greenD; (e.currentTarget as HTMLElement).style.color = S.greenD }}
+              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = S.borderA; (e.currentTarget as HTMLElement).style.color = S.muted }}
+            >
+              {engineExpanded ? '[ ▲ FECHAR ]' : '[ ▼ DETALHES ]'}
+            </button>
+          </div>
         </div>
         {/* jobs grid */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '1px', backgroundColor: S.border }}>
@@ -550,6 +538,117 @@ REGRAS: máximo 7 itens · IDs únicos em kebab-case sem repetir os de ontem · 
             🚀 FIRST-HOUR BURST — 5min após cada upload: comment AI + trending comments + replies + auto-playlist
           </span>
         </div>
+
+        {/* ── DETALHES expandidos ── */}
+        {engineExpanded && (
+          <div style={{ borderTop: `1px solid ${S.border}`, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+
+            {/* COMMENTS — hoje */}
+            <div>
+              <p style={{ ...label, marginBottom: '6px', color: S.greenD }}>💬 AUTO-COMMENTS · hoje</p>
+              {autoComStatus?.todayEntries?.length > 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                  {autoComStatus.todayEntries.map((e: any) => {
+                    const link = e.commentId
+                      ? `https://www.youtube.com/watch?v=${e.videoId}&lc=${e.commentId}`
+                      : `https://www.youtube.com/watch?v=${e.videoId}`
+                    return (
+                      <div key={e.videoId} style={{ display: 'flex', gap: '8px', alignItems: 'baseline', padding: '4px 8px', backgroundColor: S.bgDeep }}>
+                        <span style={{ color: S.greenD, fontSize: '9px', flexShrink: 0 }}>✓</span>
+                        <span style={{ color: S.muted, fontSize: '9px', flexShrink: 0, minWidth: '90px' }}>{e.artist}</span>
+                        <span style={{ color: S.dimmer, fontSize: '9px', fontStyle: 'italic', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>"{e.comment}"</span>
+                        <a href={link} target="_blank" rel="noopener noreferrer"
+                          style={{ color: '#2a4a6a', fontSize: '9px', textDecoration: 'none', flexShrink: 0 }}
+                          onMouseEnter={e2 => { (e2.currentTarget as HTMLElement).style.color = S.blue }}
+                          onMouseLeave={e2 => { (e2.currentTarget as HTMLElement).style.color = '#2a4a6a' }}>
+                          [ VER ]
+                        </a>
+                      </div>
+                    )
+                  })}
+                </div>
+              ) : (
+                <p style={{ color: S.dimmer, fontSize: '10px', margin: 0 }}>Sem comentários hoje ainda.</p>
+              )}
+            </div>
+
+            {/* REPLIES — última run */}
+            <div>
+              <p style={{ ...label, marginBottom: '6px', color: S.greenD }}>🔁 AUTO-REPLIES · última run</p>
+              {autoRepStatus?.lastResult?.results?.filter((r: any) => r.ok).length > 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                  {autoRepStatus.lastResult.results.filter((r: any) => r.ok).map((r: any, i: number) => (
+                    <div key={i} style={{ padding: '5px 8px', backgroundColor: S.bgDeep, display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
+                      <span style={{ color: S.greenD, fontSize: '9px', flexShrink: 0, marginTop: '1px' }}>✓</span>
+                      <div style={{ minWidth: 0 }}>
+                        <p style={{ color: S.dimmer, fontSize: '9px', margin: '0 0 2px', fontStyle: 'italic' }}>
+                          {r.author}: "{r.originalComment?.slice(0, 60)}{(r.originalComment?.length ?? 0) > 60 ? '…' : ''}"
+                        </p>
+                        <p style={{ color: S.greenD, fontSize: '10px', margin: 0 }}>↳ {r.reply}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p style={{ color: S.dimmer, fontSize: '10px', margin: 0 }}>
+                  {autoRepStatus?.lastResult?.message ?? 'Sem respostas na última run.'}
+                </p>
+              )}
+            </div>
+
+            {/* PLAYLISTS */}
+            <div>
+              <p style={{ ...label, marginBottom: '6px', color: S.greenD }}>📂 AUTO-PLAYLISTS · estado</p>
+              {autoPlStatus?.playlists && Object.keys(autoPlStatus.playlists).length > 0 ? (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                  {Object.entries(autoPlStatus.playlists).map(([style, pid]: [string, any]) => (
+                    <a key={style}
+                      href={`https://www.youtube.com/playlist?list=${pid}`}
+                      target="_blank" rel="noopener noreferrer"
+                      style={{ color: S.blue, fontSize: '9px', border: `1px solid #1a2030`, padding: '3px 8px', textDecoration: 'none' }}
+                      onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = '#88bbdd' }}
+                      onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = S.blue }}>
+                      {style} ↗
+                    </a>
+                  ))}
+                </div>
+              ) : (
+                <p style={{ color: S.dimmer, fontSize: '10px', margin: 0 }}>Nenhuma playlist criada ainda.</p>
+              )}
+              {autoPlStatus?.lastResult?.status === 'done' && (
+                <p style={{ color: S.dimmer, fontSize: '9px', margin: '5px 0 0' }}>
+                  última scan: {autoPlStatus.lastResult.videosOrganised} vídeos organizados
+                </p>
+              )}
+            </div>
+
+            {/* SEO */}
+            <div>
+              <p style={{ ...label, marginBottom: '6px', color: S.greenD }}>🔍 AUTO-SEO · última run</p>
+              {autoSeoStatus?.lastResult?.status === 'done' ? (
+                <div>
+                  <p style={{ color: S.text, fontSize: '10px', margin: '0 0 5px' }}>
+                    ✓ {autoSeoStatus.lastResult.updated}/{autoSeoStatus.lastResult.total} vídeos atualizados
+                  </p>
+                  {autoSeoStatus.trendingUsed?.length > 0 && (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                      {autoSeoStatus.trendingUsed.map((a: string) => (
+                        <span key={a} style={{ color: S.greenD, fontSize: '9px', border: `1px solid ${S.greenX}`, padding: '2px 6px' }}>{a}</span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : autoSeoStatus?.lastResult?.status === 'error' ? (
+                <p style={{ color: S.red, fontSize: '10px', margin: 0 }}>ERRO: {autoSeoStatus.lastResult.error}</p>
+              ) : (
+                <p style={{ color: S.dimmer, fontSize: '10px', margin: 0 }}>
+                  {autoSeoStatus?.lastRun ? `Última run: ${new Date(autoSeoStatus.lastRun).toLocaleDateString('pt-BR')}` : 'Ainda não correu.'}
+                </p>
+              )}
+            </div>
+
+          </div>
+        )}
       </div>
 
       {/* ═══════════════════════════════════════════════════════════════
@@ -577,31 +676,108 @@ REGRAS: máximo 7 itens · IDs únicos em kebab-case sem repetir os de ontem · 
 
       {plan && !loading && (
         <>
-          {/* context strip */}
-          <div style={{ ...panel, padding: '10px 14px' }}>
-            <p style={{ ...label, marginBottom: '4px' }}>contexto · {DAYS_PT[new Date().getDay()]}</p>
-            <p style={{ color: S.text, fontSize: '12px', margin: 0, lineHeight: 1.6 }}>{plan.dayContext}</p>
-          </div>
+          {/* ── Upload alert + canal stats ── */}
+          {(() => {
+            const sorted     = [...(videos ?? [])].sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime())
+            const lastVideo  = sorted[0]
+            const daysSince  = lastVideo ? Math.floor((Date.now() - new Date(lastVideo.publishedAt).getTime()) / 86400000) : null
 
-          {/* main task */}
-          <div style={{ ...panelGreen, padding: '12px 14px' }}>
-            <p style={{ ...label, color: S.greenD, marginBottom: '8px' }}>⚡ tarefa principal</p>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px', flexWrap: 'wrap' }}>
-              <p style={{ color: S.green, fontSize: '13px', margin: 0, fontWeight: 'bold', lineHeight: 1.5, flex: 1 }}>
-                {plan.mainTask.text}
-              </p>
-              {plan.mainTask.page && (
-                <button
-                  onClick={() => onNavigate(plan!.mainTask.page!)}
-                  style={{ background: S.green, color: '#000', border: 'none', padding: '8px 20px', cursor: 'pointer', fontFamily: S.mono, fontSize: '11px', fontWeight: 'bold', letterSpacing: '2px', flexShrink: 0 }}
-                  onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = S.greenM }}
-                  onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = S.green }}
-                >
-                  [ FAZER AGORA ]
-                </button>
-              )}
-            </div>
-          </div>
+            const recent7  = (analyticsData ?? []).slice(-7)
+            const prev7    = (analyticsData ?? []).slice(-14, -7)
+            const views7   = recent7.reduce((s, r) => s + r.views, 0)
+            const viewsPrev= prev7.reduce((s, r) => s + r.views, 0)
+            const viewsDelta = viewsPrev > 0 ? Math.round(((views7 - viewsPrev) / viewsPrev) * 100) : null
+            const subs7    = recent7.reduce((s, r) => s + r.subscribers, 0)
+            const avgCtr   = recent7.length ? (recent7.reduce((s, r) => s + r.ctr, 0) / recent7.length) : 0
+
+            // pick the most actionable insight automatically
+            let alertMsg = '', alertColor = S.greenD
+            if (avgCtr < 2 && avgCtr > 0) {
+              alertMsg = `CTR médio ${avgCtr.toFixed(1)}% — abaixo de 2%. Testa nova thumbnail.`
+              alertColor = S.yellow
+            } else if (viewsDelta !== null && viewsDelta < -20) {
+              alertMsg = `Views caíram ${Math.abs(viewsDelta)}% esta semana vs anterior. Analisa retenção.`
+              alertColor = S.yellow
+            } else if (subs7 === 0 && views7 > 0) {
+              alertMsg = `0 subs esta semana com ${views7.toLocaleString()} views. Verifica CTA e descrição.`
+              alertColor = S.yellow
+            } else if (viewsDelta !== null && viewsDelta > 20) {
+              alertMsg = `Views +${viewsDelta}% esta semana. Replica o formato do último vídeo.`
+              alertColor = S.green
+            } else if (avgCtr >= 4) {
+              alertMsg = `CTR ${avgCtr.toFixed(1)}% — excelente. Mantém este estilo de thumbnail.`
+              alertColor = S.green
+            } else {
+              alertMsg = `${views7.toLocaleString()} views · +${subs7} subs · CTR ${avgCtr.toFixed(1)}% esta semana.`
+              alertColor = S.textM
+            }
+
+            // urgency for upload
+            const uploadColor = daysSince === null ? S.muted
+              : daysSince <= 3 ? S.greenD
+              : daysSince <= 7 ? S.yellow
+              : S.red
+            const uploadBg = daysSince !== null && daysSince > 7 ? '#0a0000' : S.bgCard
+
+            return (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+
+                {/* upload alert */}
+                <div style={{ ...panel, backgroundColor: uploadBg, borderTopColor: uploadColor, borderLeftColor: uploadColor, padding: '12px 14px' }}>
+                  <p style={{ ...label, color: uploadColor, marginBottom: '8px' }}>📅 último upload</p>
+                  {daysSince !== null ? (
+                    <>
+                      <p style={{ color: uploadColor, fontSize: '28px', fontWeight: 'bold', margin: '0 0 4px', lineHeight: 1 }}>
+                        {daysSince}
+                        <span style={{ fontSize: '11px', fontWeight: 'normal', marginLeft: '6px', color: S.muted }}>dias atrás</span>
+                      </p>
+                      <p style={{ color: S.dimmer, fontSize: '10px', margin: '0 0 10px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {lastVideo?.title?.slice(0, 48) ?? '—'}
+                      </p>
+                      {daysSince > 5 && (
+                        <button
+                          onClick={() => onNavigate('scheduler')}
+                          style={{ background: daysSince > 7 ? S.red : S.yellow, color: '#000', border: 'none', padding: '6px 14px', cursor: 'pointer', fontFamily: S.mono, fontSize: '10px', fontWeight: 'bold', letterSpacing: '1px' }}
+                          onMouseEnter={e => { (e.currentTarget as HTMLElement).style.opacity = '0.85' }}
+                          onMouseLeave={e => { (e.currentTarget as HTMLElement).style.opacity = '1' }}
+                        >
+                          {daysSince > 7 ? '[ ⚠ FAZER UPLOAD AGORA ]' : '[ PLANEAR UPLOAD ]'}
+                        </button>
+                      )}
+                    </>
+                  ) : (
+                    <p style={{ color: S.dimmer, fontSize: '11px', margin: 0 }}>Sem dados de vídeos.</p>
+                  )}
+                </div>
+
+                {/* canal insight */}
+                <div style={{ ...panel, padding: '12px 14px' }}>
+                  <p style={{ ...label, marginBottom: '8px' }}>📊 canal · esta semana</p>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', marginBottom: '10px' }}>
+                    {[
+                      { lbl: 'VIEWS', val: views7.toLocaleString(), delta: viewsDelta },
+                      { lbl: 'SUBS', val: `+${subs7}`, delta: null },
+                      { lbl: 'CTR', val: `${avgCtr.toFixed(1)}%`, delta: null },
+                    ].map(({ lbl: l, val, delta }) => (
+                      <div key={l} style={{ backgroundColor: S.bgDeep, border: `1px solid ${S.border}`, padding: '6px 8px', textAlign: 'center' }}>
+                        <p style={{ ...label, margin: '0 0 2px' }}>{l}</p>
+                        <p style={{ color: S.text, fontSize: '13px', margin: 0, fontWeight: 'bold' }}>{val}</p>
+                        {delta !== null && (
+                          <p style={{ color: delta >= 0 ? S.greenD : S.red, fontSize: '9px', margin: '2px 0 0' }}>
+                            {delta >= 0 ? '▲' : '▼'} {Math.abs(delta)}%
+                          </p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ padding: '7px 10px', backgroundColor: S.bgDeep, border: `1px solid ${alertColor === S.green ? '#1a3a1a' : alertColor === S.yellow ? '#2a2000' : alertColor === S.red ? '#2a0000' : S.border}` }}>
+                    <p style={{ color: alertColor, fontSize: '10px', margin: 0, lineHeight: 1.5 }}>▸ {alertMsg}</p>
+                  </div>
+                </div>
+
+              </div>
+            )
+          })()}
 
           {/* insights + YPP — 2 colunas */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', alignItems: 'start' }}>
