@@ -8,11 +8,11 @@ import { Audience } from './pages/Audience'
 import { Revenue } from './pages/Revenue'
 import { Settings } from './pages/Settings'
 import { Scheduler } from './pages/Scheduler'
-import { BeatStore } from './pages/BeatStore'
-import { Market } from './pages/Market'
+import { Agenda }    from './pages/Agenda'
 import { Plan } from './pages/Plan'
+import { Market } from './pages/Market'
 import { api } from './lib/api'
-import type { Page, DateRange, MarketContext } from './types'
+import type { Page, DateRange } from './types'
 import type { DailyRow, ChannelInfo, Video as ApiVideo, AudienceResponse, ArtistTrend, TrafficSource, MonthlyRevenue } from './lib/api'
 
 // ─── Dashboard login overlay ───────────────────────────────────────────────────
@@ -219,8 +219,6 @@ export default function App() {
   const [page, setPage]                         = useState<Page>('overview')
   const [dateRange, setDateRange]               = useState<DateRange>('28d')
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
-  const [schedulerPreset, setSchedulerPreset]   = useState<string | undefined>(undefined)
-  const [marketContext, setMarketContext]         = useState<MarketContext | undefined>(undefined)
 
   // Dashboard login (username/password layer)
   const [dashboardAuthed, setDashboardAuthed]   = useState(false)
@@ -351,7 +349,7 @@ export default function App() {
           trending={trending}
           trendingLoading={trendingLoading}
           trafficSources={trafficSources}
-          onUseInScheduler={(name) => { setSchedulerPreset(name); setPage('scheduler') }}
+          onUseInScheduler={() => setPage('scheduler')}
         />
       case 'videos':
         return <Videos realVideos={videos} loading={videosLoading} />
@@ -362,22 +360,13 @@ export default function App() {
       case 'revenue':
         return <Revenue revenueMonthly={revenueMonthly} revenueIncluded={revenueIncluded} />
       case 'scheduler':
-        return <Scheduler
-          onNavigate={setPage}
-          presetArtist={schedulerPreset}
-          onPresetConsumed={() => setSchedulerPreset(undefined)}
-          marketContext={marketContext}
-          onMarketContextConsumed={() => setMarketContext(undefined)}
-        />
-      case 'beatstore':
-        return <BeatStore onNavigate={setPage} />
-      case 'market':
-        return <Market
-          onNavigate={setPage}
-          onUseInScheduler={(ctx) => { setMarketContext(ctx); setPage('scheduler') }}
-        />
+        return <Scheduler />
+      case 'agenda':
+        return <Agenda />
       case 'plan':
         return <Plan channelInfo={channelInfo} analyticsData={analyticsData} videos={videos} onNavigate={setPage} />
+      case 'market':
+        return <Market onUseInScheduler={() => setPage('scheduler')} />
       case 'settings':
         return <Settings authenticated={authenticated} onLogout={async () => {
           setAuthenticated(false)
@@ -406,6 +395,7 @@ export default function App() {
             authenticated={authenticated}
             isDemo={false}
             channelId={channelInfo?.id}
+            engineActive={authenticated}
             onLogout={async () => {
               setAuthenticated(false)
               setAnalyticsData(null)

@@ -14,9 +14,9 @@ const pageTitles: Record<Page, string> = {
   audience:  '=[ AUDIENCE INSIGHTS ]========================',
   revenue:   '=[ REVENUE ]==================================',
   scheduler:  '=[ SCHEDULER / UPLOAD ]=======================',
-  beatstore:  '=[ BEAT STORE · BEATSTARS ]==================',
-  market:     '=[ MERCADO · INTELIGÊNCIA DE VENDAS ]========',
+  agenda:     '=[ AGENDA DE PUBLICAÇÕES ]=====================',
   plan:       '=[ PLANO DIÁRIO · LAIS ]======================',
+  market:     '=[ MARKET ANALYSIS ]==========================',
   settings:   '=[ SETTINGS ]=================================',
 }
 
@@ -28,9 +28,10 @@ interface HeaderProps {
   isDemo?: boolean
   channelId?: string
   onLogout?: () => void
+  engineActive?: boolean
 }
 
-export function Header({ currentPage, dateRange, onDateRangeChange, authenticated, isDemo, channelId, onLogout }: HeaderProps) {
+export function Header({ currentPage, dateRange, onDateRangeChange, authenticated, isDemo, channelId, onLogout, engineActive }: HeaderProps) {
   async function handleLogout() {
     try {
       await fetch('/api/auth/logout', { method: 'POST' })
@@ -150,7 +151,21 @@ export function Header({ currentPage, dateRange, onDateRangeChange, authenticate
           </button>
         )}
 
-        <span style={{ color: 'var(--text-faint)', fontSize: '12px' }}>&lt;PG&gt;</span>
+        <span
+          title={engineActive ? 'ALGORITHM ENGINE · ACTIVO' : 'ALGORITHM ENGINE · DESLIGADO'}
+          style={{
+            fontSize: '18px',
+            lineHeight: 1,
+            cursor: 'default',
+            filter: engineActive
+              ? 'drop-shadow(0 0 6px #00ff00) drop-shadow(0 0 12px #00aa00)'
+              : 'grayscale(1) brightness(0.25)',
+            transition: 'filter 0.6s ease',
+            userSelect: 'none',
+          }}
+        >
+          🦗
+        </span>
       </div>
     </header>
   )
