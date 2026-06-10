@@ -6,8 +6,8 @@ const fs      = require('fs')
 console.log('[SERVER] Node:', process.version, '| PORT env:', process.env.PORT)
 
 let authRoutes, accountsRoutes, channelRoutes, analyticsRoutes,
-    videosRoutes, audienceRoutes, trendingRoutes, aiRoutes, uploadRoutes,
-    instagramRoutes, beatstarsRoutes, accountManager, dashboardAuth
+    videosRoutes, audienceRoutes, trendingRoutes, marketRoutes, aiRoutes, uploadRoutes, scheduleRoutes,
+    accountManager, dashboardAuth, autoShorts, autoComments, autoReplies
 
 try {
   authRoutes      = require('./routes/auth')
@@ -17,13 +17,15 @@ try {
   videosRoutes    = require('./routes/videos')
   audienceRoutes  = require('./routes/audience')
   trendingRoutes  = require('./routes/trending')
+  marketRoutes    = require('./routes/market')
   aiRoutes        = require('./routes/ai')
   uploadRoutes    = require('./routes/upload')
-  instagramRoutes  = require('./routes/instagram')
-  beatstarsRoutes  = require('./routes/beatstars')
-  marketRoutes     = require('./routes/market')
+  scheduleRoutes  = require('./routes/schedule')
   accountManager   = require('./accountManager');
   ({ dashboardAuth } = require('./middleware/dashboardAuth'))
+  autoShorts      = require('./autoShorts')
+  autoComments    = require('./autoComments')
+  autoReplies     = require('./autoReplies')
   console.log('[SERVER] All modules loaded OK')
 } catch (err) {
   console.error('[SERVER] Module load error:', err.message)
@@ -69,12 +71,14 @@ app.use('/api/analytics', requireAuth, analyticsRoutes)
 app.use('/api/videos',    requireAuth, videosRoutes)
 app.use('/api/audience',  requireAuth, audienceRoutes)
 app.use('/api/trending',  requireAuth, trendingRoutes)
+app.use('/api/market',    requireAuth, marketRoutes)
 app.use('/api/ai',        aiRoutes)
 app.use('/api/upload',    requireAuth, uploadRoutes)
-app.use('/api/instagram',  instagramRoutes)
-app.use('/api/beatstars', beatstarsRoutes)
-app.use('/api/market',   marketRoutes)
-
+app.use('/api/schedule',  scheduleRoutes)
+app.get('/api/plan/comments-status', requireAuth, (_req, res) => res.json(autoComments.getStatus()))
+app.post('/api/plan/run-comments',   requireAuth, (_req, res) => { autoComments.runNow(); res.json({ ok: true }) })
+app.get('/api/plan/replies-status',  requireAuth, (_req, res) => res.json(autoReplies.getStatus()))
+app.post('/api/plan/run-replies',    requireAuth, (_req, res) => { autoReplies.runNow(); res.json({ ok: true }) })
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true, authenticated: accountManager.isAuthenticated(), ts: new Date().toISOString() })
 })
@@ -131,6 +135,9 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   } catch (e) {
     console.warn('[SERVER] getStatus error:', e.message)
   }
+  autoShorts.start(accountManager)
+  autoComments.start(accountManager, PORT)
+  autoReplies.start(accountManager)
 })
 
 server.on('error', (err) => {

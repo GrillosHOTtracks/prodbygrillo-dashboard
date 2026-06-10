@@ -3,6 +3,14 @@ import type { Page } from '../types'
 import type { DailyRow, ChannelInfo, Video as ApiVideo } from '../lib/api'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
+interface EngagementItem {
+  videoId: string
+  title:   string
+  channel: string
+  artist:  string
+  comment: string
+}
+
 interface CheckItem {
   id: string
   text: string
@@ -16,15 +24,6 @@ interface PlanData {
   checklist: CheckItem[]
   insights: string[]
   weeklyGoal: { subsProgress: number; subsTarget: number; watchMinutes: number; watchTarget: number }
-}
-
-interface EngagementItem {
-  videoId: string
-  title: string
-  channel: string
-  artist: string
-  commentPt: string
-  commentEn: string
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
@@ -42,7 +41,7 @@ const retroBtn: React.CSSProperties = {
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-const VALID_PAGES: Page[] = ['overview', 'videos', 'analytics', 'audience', 'revenue', 'plan', 'scheduler', 'beatstore', 'market', 'settings']
+const VALID_PAGES: Page[] = ['overview', 'videos', 'analytics', 'audience', 'revenue', 'plan', 'scheduler', 'settings']
 const DAYS_PT = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado']
 
 function sanitizePage(p: unknown): Page | undefined {
@@ -146,25 +145,73 @@ interface PlanProps {
 }
 
 export function Plan({ channelInfo, analyticsData, videos, onNavigate }: PlanProps) {
-  const [plan, setPlan]         = useState<PlanData | null>(null)
-  const [loading, setLoading]   = useState(false)
-  const [error, setError]       = useState('')
-  const [checks, setChecks]     = useState<Record<string, boolean>>({})
+  const [plan, setPlan]       = useState<PlanData | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError]     = useState('')
+  const [checks, setChecks]   = useState<Record<string, boolean>>({})
 
-  const [engagement, setEngagement]   = useState<EngagementItem[] | null>(null)
-  const [engLoading, setEngLoading]   = useState(false)
-  const [engError, setEngError]       = useState('')
-  const [engDone, setEngDone]         = useState<Record<string, boolean>>({})
+  const [engagement, setEngagement] = useState<EngagementItem[] | null>(null)
+  const [engLoading, setEngLoading] = useState(false)
+  const [engError, setEngError]     = useState('')
+  const [engDone, setEngDone]       = useState<Record<string, boolean>>({})
+
+  const [autoComStatus, setAutoComStatus]     = useState<any>(null)
+  const [autoRepStatus, setAutoRepStatus]     = useState<any>(null)
+  const [comExpanded, setComExpanded]         = useState(false)
+  const [repExpanded, setRepExpanded]         = useState(false)
+
+  function fmtCountdown(ms: number) {
+    if (ms <= 0) return '—'
+    const h = Math.floor(ms / 3600000)
+    const m = Math.floor((ms % 3600000) / 60000)
+    return h > 0 ? `${h}h ${m.toString().padStart(2, '0')}m` : `${m}m`
+  }
+
+  function loadAutoComStatus() {
+    fetch('/api/plan/comments-status')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d) setAutoComStatus(d) })
+      .catch(() => {})
+  }
+
+  function loadAutoRepStatus() {
+    fetch('/api/plan/replies-status')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d) setAutoRepStatus(d) })
+      .catch(() => {})
+  }
+
+  function runComNow() {
+    setAutoComStatus((s: any) => s ? { ...s, running: true } : s)
+    fetch('/api/plan/run-comments', { method: 'POST' })
+      .then(() => setTimeout(loadAutoComStatus, 1500))
+      .catch(() => {})
+  }
+
+  function runRepNow() {
+    setAutoRepStatus((s: any) => s ? { ...s, running: true } : s)
+    fetch('/api/plan/run-replies', { method: 'POST' })
+      .then(() => setTimeout(loadAutoRepStatus, 1500))
+      .catch(() => {})
+  }
 
   const today = todayStr()
 
   // ── Load from localStorage ─────────────────────────────────────────────────
   useEffect(() => {
-    try { const s = localStorage.getItem(`plan_${today}`);         if (s) setPlan(JSON.parse(s)) } catch {}
-    try { const s = localStorage.getItem(`plan_checks_${today}`);  if (s) setChecks(JSON.parse(s)) } catch {}
-    try { const s = localStorage.getItem(`engagement_${today}`);   if (s) setEngagement(JSON.parse(s)) } catch {}
-    try { const s = localStorage.getItem(`eng_done_${today}`);     if (s) setEngDone(JSON.parse(s)) } catch {}
+    try { const s = localStorage.getItem(`plan_${today}`);        if (s) setPlan(JSON.parse(s)) } catch {}
+    try { const s = localStorage.getItem(`plan_checks_${today}`); if (s) setChecks(JSON.parse(s)) } catch {}
+    try { const s = localStorage.getItem(`engagement_${today}`);  if (s) setEngagement(JSON.parse(s)) } catch {}
+    try { const s = localStorage.getItem(`eng_done_${today}`);    if (s) setEngDone(JSON.parse(s)) } catch {}
   }, [today])
+
+  function toggleEngDone(id: string) {
+    setEngDone(prev => {
+      const next = { ...prev, [id]: !prev[id] }
+      localStorage.setItem(`eng_done_${today}`, JSON.stringify(next))
+      return next
+    })
+  }
 
   function toggleCheck(id: string) {
     setChecks(prev => {
@@ -174,13 +221,79 @@ export function Plan({ channelInfo, analyticsData, videos, onNavigate }: PlanPro
     })
   }
 
-  function toggleEngDone(id: string) {
-    setEngDone(prev => {
-      const next = { ...prev, [id]: !prev[id] }
-      localStorage.setItem(`eng_done_${today}`, JSON.stringify(next))
-      return next
-    })
-  }
+  // ── fetchEngagement ────────────────────────────────────────────────────────
+  const fetchEngagement = useCallback(async (bust = false) => {
+    if (engLoading) return
+    setEngLoading(true)
+    setEngError('')
+
+    try {
+      // Step 1: get trending artists from /api/trending (uses Innertube, no market needed)
+      const tRes = await fetch('/api/trending')
+      if (!tRes.ok) throw new Error(`trending HTTP ${tRes.status}`)
+      const tData = await tRes.json() as Array<{ name: string }>
+
+      const artists: string[] = tData.map(a => a.name).filter(Boolean)
+      if (!artists.length) throw new Error('Sem artistas em trending — tenta mais tarde')
+
+      // On bust: shuffle to rotate through different artists
+      const pool     = bust ? [...artists].sort(() => Math.random() - 0.5) : artists
+      const selected = pool.slice(0, 5)
+
+      // Step 2: fetch one official music video per artist via Innertube
+      const avRes = await fetch(`/api/trending/artist-videos?artists=${encodeURIComponent(selected.join(','))}`)
+      if (!avRes.ok) throw new Error(`artist-videos HTTP ${avRes.status}`)
+      const avData = await avRes.json() as { videos: Array<{ artist: string; videoId: string; title: string; channel: string }> }
+
+      const artistVids = avData.videos.filter(v => v.videoId)
+      if (!artistVids.length) throw new Error('Não foi possível encontrar vídeos dos artistas')
+
+      // Step 3: LAIS generates strategic comments
+      const videoList = artistVids.map((v, i) =>
+        `${i + 1}. videoId="${v.videoId}" | artist="${v.artist}" | title="${v.title.slice(0, 70)}"`
+      ).join('\n')
+
+      const question = `You are a music producer leaving comments on official artist YouTube videos. Be strategic but authentic.
+
+Videos:
+${videoList}
+
+For EACH video write ONE comment in English (15-20 words, casual tone).
+
+Rules:
+- Sound like a genuine music fan / fellow musician — NOT spam, NOT a promoter
+- Subtly hint that you produce beats in that style WITHOUT saying it directly
+- NEVER use: "beat", "type beat", BeatStars, links, or direct self-promotion
+- Subtle hints: "This vibe is exactly what I've been working on lately", "Been deep in this sound for weeks", "This hits different every time"
+- Be specific to the artist's known sound — not generic
+- Vary tone per video: admiration, personal/reflective, hype
+
+Reply ONLY in valid JSON (no markdown, no text before or after):
+{"comments":[{"videoId":"ID","comment":"..."}]}`
+
+      const full   = await laisChat(question, 1200, PLAN_SYSTEM_PROMPT)
+      const parsed = extractJson(full) as { comments: { videoId: string; comment: string }[] }
+
+      const commentMap: Record<string, string> = {}
+      parsed.comments.forEach(c => { commentMap[c.videoId] = c.comment ?? '' })
+
+      const result: EngagementItem[] = artistVids.map(v => ({
+        videoId: v.videoId,
+        title:   v.title,
+        channel: v.channel,
+        artist:  v.artist,
+        comment: commentMap[v.videoId] ?? '',
+      }))
+
+      setEngagement(result)
+      localStorage.setItem(`engagement_${today}`, JSON.stringify(result))
+    } catch (err: any) {
+      console.warn('[engagement]', err.message)
+      setEngError(err.message)
+    } finally {
+      setEngLoading(false)
+    }
+  }, [engLoading, today])
 
   // ── fetchPlan ──────────────────────────────────────────────────────────────
   const fetchPlan = useCallback(async () => {
@@ -279,88 +392,26 @@ REGRAS: máximo 7 itens · IDs únicos em kebab-case sem repetir os de ontem · 
     }
   }, [loading, channelInfo, analyticsData, videos, today])
 
-  // ── fetchEngagement ────────────────────────────────────────────────────────
-  const fetchEngagement = useCallback(async (bust = false) => {
-    if (engLoading) return
-    setEngLoading(true)
-    setEngError('')
-
-    try {
-      // Step 1: get market data — use pre-extracted referenceArtists from server
-      const mRes = await fetch('/api/market')
-      if (!mRes.ok) throw new Error(`market HTTP ${mRes.status}`)
-      const mData = await mRes.json()
-
-      const artists: string[] = mData.typeBeat?.referenceArtists ?? []
-      if (!artists.length) throw new Error('Sem artistas no mercado — abre a aba MERCADO primeiro')
-
-      // On bust: shuffle to rotate through different artists
-      const pool = bust ? [...artists].sort(() => Math.random() - 0.5) : artists
-      const selected5 = pool.slice(0, 5)
-
-      // Step 2: fetch official videos for each artist via Innertube
-      const avRes = await fetch(`/api/market/artist-videos?artists=${encodeURIComponent(selected5.join(','))}`)
-      if (!avRes.ok) throw new Error(`artist-videos HTTP ${avRes.status}`)
-      const avData = await avRes.json() as { videos: Array<{ artist: string; videoId: string; title: string; channel: string }> }
-
-      const artistVids = avData.videos.filter(v => v.videoId)
-      if (!artistVids.length) throw new Error('Não foi possível encontrar vídeos dos artistas')
-
-      // Step 3: LAIS generates strategic comments with subtle producer angle
-      const videoList = artistVids.map((v, i) =>
-        `${i + 1}. videoId="${v.videoId}" | artist="${v.artist}" | title="${v.title.slice(0, 70)}"`
-      ).join('\n')
-
-      const question = `You are a music producer leaving comments on official artist YouTube videos. Be strategic but authentic.
-
-Videos:
-${videoList}
-
-For EACH video write TWO comments:
-1. commentPt: in Brazilian Portuguese (casual, 15-20 words)
-2. commentEn: in English (casual, 15-20 words)
-
-Rules:
-- Sound like a genuine music fan / fellow musician — NOT spam, NOT a promoter
-- Subtly hint that you produce beats in that style WITHOUT saying it directly
-- NEVER use: "beat", "type beat", BeatStars, links, or direct self-promotion
-- Subtle hints examples: "This vibe is exactly what I've been working on lately", "Been deep in this sound for weeks", "Esse som é tudo que tenho produzido ultimamente"
-- Be specific to the artist's known sound or era — not generic
-- Vary tone: one comment = admiration/fan, other = personal/reflective producer angle
-
-Reply ONLY in valid JSON (no markdown, no text before or after):
-{"comments":[{"videoId":"ID","commentPt":"...","commentEn":"..."}]}`
-
-      const full   = await laisChat(question, 1500, PLAN_SYSTEM_PROMPT)
-      const parsed = extractJson(full) as { comments: { videoId: string; commentPt: string; commentEn: string }[] }
-
-      const commentMap: Record<string, { pt: string; en: string }> = {}
-      parsed.comments.forEach(c => { commentMap[c.videoId] = { pt: c.commentPt ?? '', en: c.commentEn ?? '' } })
-
-      const result: EngagementItem[] = artistVids.map(v => ({
-        videoId:   v.videoId,
-        title:     v.title,
-        channel:   v.channel,
-        artist:    v.artist,
-        commentPt: commentMap[v.videoId]?.pt ?? '',
-        commentEn: commentMap[v.videoId]?.en ?? '',
-      }))
-
-      setEngagement(result)
-      localStorage.setItem(`engagement_${today}`, JSON.stringify(result))
-    } catch (err: any) {
-      console.warn('[engagement]', err.message)
-      setEngError(err.message)
-    } finally {
-      setEngLoading(false)
-    }
-  }, [engLoading, today])
-
   // ── Auto-fetch on mount ────────────────────────────────────────────────────
   useEffect(() => {
     if (!localStorage.getItem(`plan_${today}`))       fetchPlan()
     if (!localStorage.getItem(`engagement_${today}`)) fetchEngagement()
+    loadAutoComStatus()
+    loadAutoRepStatus()
   }, []) // eslint-disable-line
+
+  // ── Poll auto-comment status — fast when running, slow when idle ───────────
+  useEffect(() => {
+    const interval = autoComStatus?.running ? 3000 : 30000
+    const iv = setInterval(loadAutoComStatus, interval)
+    return () => clearInterval(iv)
+  }, [autoComStatus?.running])
+
+  useEffect(() => {
+    const interval = autoRepStatus?.running ? 3000 : 30000
+    const iv = setInterval(loadAutoRepStatus, interval)
+    return () => clearInterval(iv)
+  }, [autoRepStatus?.running])
 
   // ── Midnight regeneration ──────────────────────────────────────────────────
   useEffect(() => {
@@ -376,7 +427,15 @@ Reply ONLY in valid JSON (no markdown, no text before or after):
 
   const doneCount    = plan?.checklist.filter(i => checks[i.id]).length ?? 0
   const totalCount   = plan?.checklist.length ?? 0
-  const engDoneCount = Object.values(engDone).filter(Boolean).length
+
+  // videoIds the auto-job already commented on
+  const jobPostedIds = new Set<string>(
+    (autoComStatus?.todayEntries ?? []).map((e: any) => e.videoId)
+  )
+  // item counts as done if manually marked OR job already posted
+  const engDoneCount = (engagement ?? []).filter(
+    item => !!engDone[item.videoId] || jobPostedIds.has(item.videoId)
+  ).length
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
@@ -526,13 +585,12 @@ Reply ONLY in valid JSON (no markdown, no text before or after):
           FILA DE ENGAJAMENTO
       ══════════════════════════════════════════════════════════ */}
       <div style={panel}>
-        {/* Header */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
           <div>
-            <p style={{ ...dim, margin: '0 0 4px' }}>💬 FILA DE ENGAJAMENTO</p>
+            <p style={{ ...dim, margin: '0 0 4px' }}>💬 COMENTÁRIOS · vídeos em alta no nicho · só inglês</p>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <span style={{ color: engDoneCount >= 5 ? '#00ff00' : '#c0c0c0', fontSize: '12px', fontWeight: 'bold' }}>
-                ENGAJAMENTO DO DIA: {engDoneCount}/5
+                {engDoneCount}/5 comentários feitos
               </span>
               <div style={{ fontSize: '10px', letterSpacing: '-1px' }}>
                 <span style={{ color: engDoneCount >= 5 ? '#00ff00' : '#00aa00' }}>{'█'.repeat(engDoneCount)}</span>
@@ -551,118 +609,280 @@ Reply ONLY in valid JSON (no markdown, no text before or after):
           </button>
         </div>
 
-        {/* Loading state */}
-        {engLoading && !engagement && (
-          <div style={{ textAlign: 'center', padding: '20px' }}>
-            <p style={{ color: '#333333', fontSize: '11px', margin: 0 }}>{'█'.repeat(10)}<span className="blink">█</span></p>
-            <p style={{ color: '#2a2a2a', fontSize: '10px', margin: '8px 0 0', letterSpacing: '1px' }}>LAIS a selecionar vídeos do nicho...</p>
+        {/* ── Auto-comment job status bar ── */}
+        {autoComStatus && (
+          <div style={{ backgroundColor: '#050505', border: '1px solid #1a2a1a', marginBottom: '12px' }}>
+            {/* Top row */}
+            <div style={{ padding: '8px 12px', display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+              <span style={{ color: '#2a4a2a', fontSize: '9px', letterSpacing: '1px', flexShrink: 0 }}>● JOB AUTO · 4×/DIA</span>
+
+              {autoComStatus.running ? (
+                <span style={{ color: '#ffaa00', fontSize: '10px', flexShrink: 0 }}>
+                  <span className="blink">●</span> A COMENTAR...
+                </span>
+              ) : (
+                <span style={{ color: '#00aa00', fontSize: '10px', flexShrink: 0 }}>
+                  ✓ {autoComStatus.todayPosted ?? 0} hoje · {autoComStatus.totalPosted ?? 0} total
+                </span>
+              )}
+
+              {!autoComStatus.running && (
+                <span style={{ color: '#2a2a2a', fontSize: '10px', flexShrink: 0 }}>
+                  próx. {fmtCountdown(autoComStatus.msUntilNext)}
+                </span>
+              )}
+
+              {autoComStatus.lastResult?.status === 'error' && (
+                <span style={{ color: '#ff4400', fontSize: '10px', flex: 1 }}>
+                  ERRO: {autoComStatus.lastResult.error}
+                </span>
+              )}
+
+              <div style={{ marginLeft: 'auto', display: 'flex', gap: '6px', flexShrink: 0 }}>
+                {(autoComStatus.todayEntries?.length > 0 || autoComStatus.lastResult) && (
+                  <button
+                    onClick={() => setComExpanded(x => !x)}
+                    style={{ ...retroBtn, fontSize: '9px', padding: '3px 8px' }}
+                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = '#555555'; (e.currentTarget as HTMLElement).style.color = '#888888' }}
+                    onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = '#2a2a2a'; (e.currentTarget as HTMLElement).style.color = '#555555' }}
+                  >
+                    {comExpanded ? '[ ▲ FECHAR ]' : '[ ▼ DETALHES ]'}
+                  </button>
+                )}
+                <button
+                  onClick={runComNow}
+                  disabled={autoComStatus.running}
+                  style={{ ...retroBtn, opacity: autoComStatus.running ? 0.4 : 1 }}
+                  onMouseEnter={e => { if (!autoComStatus.running) { (e.currentTarget as HTMLElement).style.borderColor = '#00aa00'; (e.currentTarget as HTMLElement).style.color = '#00aa00' } }}
+                  onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = '#2a2a2a'; (e.currentTarget as HTMLElement).style.color = '#555555' }}
+                >
+                  {autoComStatus.running ? '[ A COMENTAR... ]' : '[ EXECUTAR AGORA ]'}
+                </button>
+              </div>
+            </div>
+
+            {/* Schedule row */}
+            <div style={{ padding: '4px 12px 8px', display: 'flex', gap: '6px', flexWrap: 'wrap', borderTop: '1px solid #111' }}>
+              <span style={{ color: '#2a2a2a', fontSize: '9px', letterSpacing: '1px', marginRight: '4px' }}>HORÁRIOS BRT:</span>
+              {['21:00', '10:00', '14:00', '18:00'].map(t => {
+                const [h] = t.split(':').map(Number)
+                const nowBRT = new Date(Date.now() - 3 * 3600000)
+                const nowH = nowBRT.getUTCHours()
+                const passed = nowH > h || (nowH === h && nowBRT.getUTCMinutes() > 5)
+                return (
+                  <span key={t} style={{ color: passed ? '#1a3a1a' : '#00aa00', fontSize: '9px', letterSpacing: '1px' }}>
+                    {passed ? '✓' : '▸'} {t}
+                  </span>
+                )
+              })}
+            </div>
+
+            {/* Expanded: today's posted comments */}
+            {comExpanded && autoComStatus.todayEntries?.length > 0 && (
+              <div style={{ borderTop: '1px solid #111', padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                {autoComStatus.todayEntries.map((e: any) => {
+                  const link = e.commentId
+                    ? `https://www.youtube.com/watch?v=${e.videoId}&lc=${e.commentId}`
+                    : `https://www.youtube.com/watch?v=${e.videoId}`
+                  return (
+                    <div key={e.videoId} style={{ display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
+                      <span style={{ color: '#00aa00', fontSize: '9px', flexShrink: 0, marginTop: '2px' }}>✓</span>
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <div style={{ display: 'flex', gap: '6px', alignItems: 'baseline', flexWrap: 'wrap' }}>
+                          <span style={{ color: '#555555', fontSize: '9px' }}>{e.artist}</span>
+                          <span style={{ color: '#444444', fontSize: '9px', fontStyle: 'italic', flex: 1 }}>"{e.comment}"</span>
+                          <a
+                            href={link}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{ color: '#2a4a6a', fontSize: '9px', textDecoration: 'none', flexShrink: 0, letterSpacing: '0.3px' }}
+                            onMouseEnter={e2 => { (e2.currentTarget as HTMLElement).style.color = '#5588aa' }}
+                            onMouseLeave={e2 => { (e2.currentTarget as HTMLElement).style.color = '#2a4a6a' }}
+                          >
+                            {e.commentId ? '[ VER COMENTÁRIO ]' : '[ VER VÍDEO ]'}
+                          </a>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
           </div>
         )}
 
-        {/* Engagement error */}
+        {engLoading && !engagement && (
+          <div style={{ textAlign: 'center', padding: '20px' }}>
+            <p style={{ color: '#333333', fontSize: '11px', margin: 0 }}>{'█'.repeat(10)}<span className="blink">█</span></p>
+            <p style={{ color: '#2a2a2a', fontSize: '10px', margin: '8px 0 0', letterSpacing: '1px' }}>LAIS a selecionar vídeos do nicho via trending...</p>
+          </div>
+        )}
+
         {engError && !engLoading && (
           <div style={{ padding: '8px 12px', backgroundColor: '#0a0000', border: '1px solid #330000', marginBottom: '8px' }}>
             <p style={{ color: '#ff4400', fontSize: '10px', margin: 0, letterSpacing: '0.5px' }}>ERRO: {engError}</p>
           </div>
         )}
 
-        {/* No data prompt */}
         {!engagement && !engLoading && (
           <div style={{ padding: '16px', backgroundColor: '#080808', border: '1px solid #1a1a1a', textAlign: 'center' }}>
             <p style={{ color: '#444444', fontSize: '11px', margin: '0 0 8px' }}>
-              Sem dados de mercado — abre a aba MERCADO primeiro para carregar os vídeos do nicho.
+              Sem vídeos para hoje — clica para gerar via artistas em trending.
             </p>
-            <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
-              <button
-                onClick={() => onNavigate('market')}
-                style={{ ...retroBtn, borderColor: '#1a3a1a', color: '#00aa00' }}
-                onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = '#00ff00'; (e.currentTarget as HTMLElement).style.borderColor = '#00aa00' }}
-                onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = '#00aa00'; (e.currentTarget as HTMLElement).style.borderColor = '#1a3a1a' }}
-              >
-                [ IR PARA MERCADO ]
-              </button>
-              <button
-                onClick={() => fetchEngagement(false)}
-                style={retroBtn}
-                onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = '#00aa00'; (e.currentTarget as HTMLElement).style.color = '#00aa00' }}
-                onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = '#2a2a2a'; (e.currentTarget as HTMLElement).style.color = '#555555' }}
-              >
-                [ TENTAR MESMO ASSIM ]
-              </button>
-            </div>
+            <button
+              onClick={() => fetchEngagement(false)}
+              style={retroBtn}
+              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = '#00aa00'; (e.currentTarget as HTMLElement).style.color = '#00aa00' }}
+              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = '#2a2a2a'; (e.currentTarget as HTMLElement).style.color = '#555555' }}
+            >
+              [ GERAR FILA ]
+            </button>
           </div>
         )}
 
-        {/* Engagement list */}
         {engagement && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             {engagement.map((item, idx) => {
-              const done = !!engDone[item.videoId]
+              const jobDone    = jobPostedIds.has(item.videoId)
+              const manualDone = !!engDone[item.videoId]
+              const done       = manualDone || jobDone
               return (
                 <div
                   key={item.videoId}
-                  style={{ padding: '10px 12px', backgroundColor: done ? '#0a1a0a' : '#080808', border: `1px solid ${done ? '#1a3a1a' : '#1a1a1a'}`, opacity: done ? 0.5 : 1 }}
+                  style={{ padding: '10px 12px', backgroundColor: done ? '#0a1a0a' : '#080808', border: `1px solid ${done ? '#1a3a1a' : '#1a1a1a'}`, opacity: done ? 0.55 : 1 }}
                 >
-                  {/* Video info */}
-                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', marginBottom: '8px' }}>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <p style={{ color: done ? '#444444' : '#c0c0c0', fontSize: '11px', margin: '0 0 2px', textDecoration: done ? 'line-through' : 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <div style={{ flex: 1, minWidth: 0, marginBottom: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '2px' }}>
+                      <p style={{ color: done ? '#444444' : '#c0c0c0', fontSize: '11px', margin: 0, textDecoration: done ? 'line-through' : 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
                         {idx + 1}. {item.title}
                       </p>
-                      <p style={{ color: '#555555', fontSize: '10px', margin: 0 }}>
-                        <span style={{ color: '#00aa00' }}>{item.artist}</span> · {item.channel}
-                      </p>
+                      {jobDone && (
+                        <span style={{ color: '#1a4a1a', fontSize: '9px', border: '1px solid #1a3a1a', padding: '1px 5px', flexShrink: 0, letterSpacing: '0.5px' }}>
+                          JOB ✓
+                        </span>
+                      )}
                     </div>
+                    <p style={{ color: '#555555', fontSize: '10px', margin: 0 }}>
+                      <span style={{ color: '#00aa00' }}>{item.artist}</span>{item.channel ? ` · ${item.channel}` : ''}
+                    </p>
                   </div>
 
-                  {/* Comments: PT + EN */}
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '8px' }}>
-                    {item.commentPt && (
-                      <div style={{ backgroundColor: '#050505', border: '1px solid #1a2a1a', padding: '7px 10px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '4px' }}>
-                          <CopyBtn text={item.commentPt} label="[ COPIAR PT ]" />
-                        </div>
-                        <p style={{ color: '#a0a0a0', fontSize: '11px', margin: 0, lineHeight: 1.5, fontStyle: 'italic' }}>
-                          "{item.commentPt}"
+                  {item.comment && (
+                    <div style={{ backgroundColor: '#050505', border: '1px solid #1a2030', padding: '8px 10px', marginBottom: '8px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px' }}>
+                        <p style={{ color: '#a0a0a0', fontSize: '11px', margin: 0, lineHeight: 1.5, fontStyle: 'italic', flex: 1 }}>
+                          "{item.comment}"
                         </p>
+                        <CopyBtn text={item.comment} label="[ COPY ]" />
                       </div>
-                    )}
-                    {item.commentEn && (
-                      <div style={{ backgroundColor: '#050505', border: '1px solid #1a2030', padding: '7px 10px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '4px' }}>
-                          <CopyBtn text={item.commentEn} label="[ COPIAR EN ]" />
-                        </div>
-                        <p style={{ color: '#a0a0a0', fontSize: '11px', margin: 0, lineHeight: 1.5, fontStyle: 'italic' }}>
-                          "{item.commentEn}"
-                        </p>
-                      </div>
-                    )}
-                  </div>
+                    </div>
+                  )}
 
-                  {/* Actions */}
                   <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                     <a
-                      href={`https://www.youtube.com/watch?v=${item.videoId}&lc=new&comment=${encodeURIComponent(item.commentEn)}`}
+                      href={`https://www.youtube.com/watch?v=${item.videoId}`}
                       target="_blank"
                       rel="noopener noreferrer"
                       style={{ background: 'transparent', border: '1px solid #1a2030', color: '#5588aa', fontSize: '9px', padding: '3px 8px', fontFamily: 'Courier New, monospace', letterSpacing: '0.5px', textDecoration: 'none', flexShrink: 0 }}
                       onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = '#336699'; (e.currentTarget as HTMLElement).style.color = '#88bbdd' }}
                       onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = '#1a2030'; (e.currentTarget as HTMLElement).style.color = '#5588aa' }}
                     >
-                      [ COMENTAR ]
+                      [ VER VÍDEO ]
                     </a>
-                    <button
-                      onClick={() => toggleEngDone(item.videoId)}
-                      style={{ background: done ? '#0a1a0a' : 'transparent', border: `1px solid ${done ? '#00ff00' : '#1a1a1a'}`, color: done ? '#00ff00' : '#333333', fontSize: '9px', padding: '3px 8px', cursor: 'pointer', fontFamily: 'Courier New, monospace', letterSpacing: '0.5px', flexShrink: 0 }}
-                      onMouseEnter={e => { if (!done) { (e.currentTarget as HTMLElement).style.borderColor = '#00aa00'; (e.currentTarget as HTMLElement).style.color = '#00aa00' } }}
-                      onMouseLeave={e => { if (!done) { (e.currentTarget as HTMLElement).style.borderColor = '#1a1a1a'; (e.currentTarget as HTMLElement).style.color = '#333333' } }}
-                    >
-                      {done ? '✓ FEITO' : '[ MARCAR FEITO ]'}
-                    </button>
+                    {jobDone ? (
+                      <span style={{ color: '#1a4a1a', fontSize: '9px', padding: '3px 8px', border: '1px solid #1a3a1a', letterSpacing: '0.5px' }}>
+                        ✓ JOB POSTOU
+                      </span>
+                    ) : (
+                      <button
+                        onClick={() => toggleEngDone(item.videoId)}
+                        style={{ background: manualDone ? '#0a1a0a' : 'transparent', border: `1px solid ${manualDone ? '#00ff00' : '#1a1a1a'}`, color: manualDone ? '#00ff00' : '#333333', fontSize: '9px', padding: '3px 8px', cursor: 'pointer', fontFamily: 'Courier New, monospace', letterSpacing: '0.5px', flexShrink: 0 }}
+                        onMouseEnter={e => { if (!manualDone) { (e.currentTarget as HTMLElement).style.borderColor = '#00aa00'; (e.currentTarget as HTMLElement).style.color = '#00aa00' } }}
+                        onMouseLeave={e => { if (!manualDone) { (e.currentTarget as HTMLElement).style.borderColor = '#1a1a1a'; (e.currentTarget as HTMLElement).style.color = '#333333' } }}
+                      >
+                        {manualDone ? '✓ FEITO' : '[ MARCAR FEITO ]'}
+                      </button>
+                    )}
                   </div>
                 </div>
               )
             })}
+          </div>
+        )}
+      </div>
+
+      {/* ══════════════════════════════════════════════════════════
+          AUTO-REPLIES — responde comentários nos teus vídeos
+      ══════════════════════════════════════════════════════════ */}
+      <div style={panel}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+          <div>
+            <p style={{ ...dim, margin: '0 0 3px' }}>💬 RESPOSTAS · comentários nos teus vídeos · AI</p>
+            <span style={{ color: '#555555', fontSize: '10px' }}>
+              {autoRepStatus ? `${autoRepStatus.todayReplied ?? 0} hoje · ${autoRepStatus.totalReplied ?? 0} total` : '—'}
+            </span>
+          </div>
+          <div style={{ display: 'flex', gap: '6px' }}>
+            {autoRepStatus?.lastResult?.results?.length > 0 && (
+              <button
+                onClick={() => setRepExpanded(x => !x)}
+                style={{ ...retroBtn, fontSize: '9px', padding: '3px 8px' }}
+                onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = '#555555'; (e.currentTarget as HTMLElement).style.color = '#888888' }}
+                onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = '#2a2a2a'; (e.currentTarget as HTMLElement).style.color = '#555555' }}
+              >
+                {repExpanded ? '[ ▲ FECHAR ]' : '[ ▼ VER RESPOSTAS ]'}
+              </button>
+            )}
+            <button
+              onClick={runRepNow}
+              disabled={autoRepStatus?.running}
+              style={{ ...retroBtn, opacity: autoRepStatus?.running ? 0.4 : 1 }}
+              onMouseEnter={e => { if (!autoRepStatus?.running) { (e.currentTarget as HTMLElement).style.borderColor = '#00aa00'; (e.currentTarget as HTMLElement).style.color = '#00aa00' } }}
+              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = '#2a2a2a'; (e.currentTarget as HTMLElement).style.color = '#555555' }}
+            >
+              {autoRepStatus?.running ? '[ A RESPONDER... ]' : '[ EXECUTAR AGORA ]'}
+            </button>
+          </div>
+        </div>
+
+        {/* Status row */}
+        {autoRepStatus && (
+          <div style={{ padding: '6px 10px', backgroundColor: '#050505', border: '1px solid #1a1a1a', marginBottom: repExpanded ? '10px' : 0, display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
+            <span style={{ color: autoRepStatus.running ? '#ffaa00' : '#2a4a2a', fontSize: '9px', letterSpacing: '1px' }}>
+              {autoRepStatus.running ? <span className="blink">● A RESPONDER...</span> : '● JOB AUTO · 2h'}
+            </span>
+            {!autoRepStatus.running && (
+              <span style={{ color: '#2a2a2a', fontSize: '10px' }}>
+                próx. {fmtCountdown(autoRepStatus.msUntilNext)}
+              </span>
+            )}
+            {autoRepStatus.lastResult?.status === 'done' && !autoRepStatus.running && (
+              <span style={{ color: '#1a4a1a', fontSize: '10px' }}>
+                ✓ última run: {autoRepStatus.lastResult.replied}/{autoRepStatus.lastResult.total} respostas
+              </span>
+            )}
+            {autoRepStatus.lastResult?.status === 'error' && (
+              <span style={{ color: '#ff4400', fontSize: '10px' }}>ERRO: {autoRepStatus.lastResult.error}</span>
+            )}
+            {autoRepStatus.lastResult?.message && (
+              <span style={{ color: '#333333', fontSize: '10px' }}>{autoRepStatus.lastResult.message}</span>
+            )}
+          </div>
+        )}
+
+        {/* Expanded: last run replies */}
+        {repExpanded && autoRepStatus?.lastResult?.results?.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            {autoRepStatus.lastResult.results.filter((r: any) => r.ok).map((r: any, i: number) => (
+              <div key={i} style={{ padding: '8px 10px', backgroundColor: '#050505', border: '1px solid #1a1a1a' }}>
+                <p style={{ color: '#333333', fontSize: '9px', margin: '0 0 4px', fontStyle: 'italic' }}>
+                  {r.author}: "{r.originalComment?.slice(0, 80)}{(r.originalComment?.length ?? 0) > 80 ? '…' : ''}"
+                </p>
+                <p style={{ color: '#00aa00', fontSize: '10px', margin: 0 }}>
+                  ↳ {r.reply}
+                </p>
+              </div>
+            ))}
           </div>
         )}
       </div>

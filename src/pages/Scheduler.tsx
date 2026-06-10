@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { ThumbnailBuilder } from '../components/scheduler/ThumbnailBuilder'
 import { analyzeAudio } from '../lib/audioAnalysis'
-import type { Page, MarketContext } from '../types'
+
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface BeatAnalysis {
@@ -22,12 +22,11 @@ interface UploadEntry {
   id: string; title: string; publishedAt: string
   status: 'scheduled' | 'live' | 'error'
   thumbnailUrl: string | null; videoUrl: string; views: number; uploadedAt: string
+  isShort?: boolean
 }
 
 type AiStatus    = 'idle' | 'loading' | 'done' | 'error'
 type UploadPhase = 'idle' | 'sending' | 'uploading' | 'processing' | 'done' | 'error'
-type IgPhase     = 'idle' | 'creating' | 'processing' | 'publishing' | 'done' | 'error'
-interface IgStatus { authenticated: boolean; username?: string; daysLeft?: number | null; warning?: string | null }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 const panel: React.CSSProperties = {
@@ -117,9 +116,12 @@ function StepIndicator({ step }: { step: 1 | 2 | 3 | 4 }) {
 
 // ─── Upload history ───────────────────────────────────────────────────────────
 function UploadHistory({ refreshKey }: { refreshKey: number }) {
-  const [history, setHistory]       = useState<UploadEntry[]>([])
-  const [loading, setLoading]       = useState(false)
-  const [refreshing, setRefreshing] = useState(false)
+  const [history, setHistory]         = useState<UploadEntry[]>([])
+  const [loading, setLoading]         = useState(false)
+  const [refreshing, setRefreshing]   = useState(false)
+  const [creatingShort, setCreatingShort] = useState<string | null>(null)
+  const [shortMsg, setShortMsg]       = useState<Record<string, string>>({})
+  const [autoStatus, setAutoStatus]   = useState<{ running: boolean; pending: number; msUntilNext: number; lastResult: any } | null>(null)
 
   async function load() {
     setLoading(true)
@@ -135,8 +137,77 @@ function UploadHistory({ refreshKey }: { refreshKey: number }) {
     await fetch(`/api/upload/history/${id}`, { method: 'DELETE' })
     setHistory(h => h.filter(e => e.id !== id))
   }
+  async function createShort(e: UploadEntry) {
+    if (creatingShort) return
+    setCreatingShort(e.id)
+    setShortMsg(m => ({ ...m, [e.id]: 'A descarregar...' }))
+    try {
+      const res = await fetch('/api/upload/create-short', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ videoId: e.id, title: e.title }),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const reader = res.body!.getReader()
+      const decoder = new TextDecoder()
+      let buf = ''
+      outer: while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buf += decoder.decode(value, { stream: true })
+        const lines = buf.split('\n'); buf = lines.pop() ?? ''
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue
+          const payload = line.slice(6).trim()
+          if (payload === '[DONE]') break outer
+          try {
+            const evt = JSON.parse(payload)
+            if (evt.status === 'DOWNLOADING') setShortMsg(m => ({ ...m, [e.id]: 'A descarregar vídeo...' }))
+            if (evt.status === 'CUTTING')     setShortMsg(m => ({ ...m, [e.id]: 'A cortar short (59s)...' }))
+            if (evt.status === 'UPLOADING')   setShortMsg(m => ({ ...m, [e.id]: 'A enviar para YouTube...' }))
+            if (evt.status === 'DONE') {
+              setShortMsg(m => ({ ...m, [e.id]: `✓ Short publicado` }))
+              load()
+            }
+            if (evt.status === 'ERROR') setShortMsg(m => ({ ...m, [e.id]: `⚠ ${evt.error}` }))
+          } catch {}
+        }
+      }
+    } catch (err: any) {
+      setShortMsg(m => ({ ...m, [e.id]: `⚠ ${err.message}` }))
+    } finally {
+      setCreatingShort(null)
+    }
+  }
 
-  useEffect(() => { load() }, [refreshKey])
+  // Set of video IDs that already have a short in history
+  const shortedIds = new Set(
+    history
+      .filter(e => e.isShort)
+      .map(e => e.title.replace(/\s*#shorts\s*$/i, '').trim())
+  )
+
+  async function loadAutoStatus() {
+    try {
+      const r = await fetch('/api/upload/auto-shorts/status')
+      if (r.ok) setAutoStatus(await r.json())
+    } catch {}
+  }
+  async function runNow() {
+    await fetch('/api/upload/auto-shorts/run-now', { method: 'POST' })
+    setTimeout(loadAutoStatus, 1000)
+  }
+  function fmtCountdown(ms: number) {
+    const h = Math.floor(ms / 3600000)
+    const m = Math.floor((ms % 3600000) / 60000)
+    return `${h}h ${m}m`
+  }
+
+  useEffect(() => { load(); loadAutoStatus() }, [refreshKey])
+  useEffect(() => {
+    const t = setInterval(loadAutoStatus, 30000)
+    return () => clearInterval(t)
+  }, [])
 
   return (
     <div style={panel}>
@@ -148,6 +219,26 @@ function UploadHistory({ refreshKey }: { refreshKey: number }) {
           {refreshing ? '[ ATUALIZANDO... ]' : '[ ATUALIZAR VIEWS ]'}
         </button>
       </div>
+      {autoStatus && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '10px', padding: '6px 10px', backgroundColor: '#080810', border: '1px solid #1a1a2a' }}>
+          <span style={{ color: autoStatus.running ? '#44aaff' : autoStatus.pending > 0 ? '#ffaa00' : '#333', fontSize: '10px', letterSpacing: '1px' }}>
+            {autoStatus.running ? '⟳ A CRIAR SHORT...' : autoStatus.pending > 0 ? `◌ ${autoStatus.pending} SHORT${autoStatus.pending > 1 ? 'S' : ''} PENDENTE${autoStatus.pending > 1 ? 'S' : ''}` : '✓ TODOS OS SHORTS CRIADOS'}
+          </span>
+          {!autoStatus.running && autoStatus.pending > 0 && (
+            <span style={{ color: '#333', fontSize: '10px' }}>próximo em {fmtCountdown(autoStatus.msUntilNext)}</span>
+          )}
+          {autoStatus.lastResult && (
+            <span style={{ color: autoStatus.lastResult.status === 'done' ? '#44aaff' : autoStatus.lastResult.status === 'error' ? '#ff4400' : '#333', fontSize: '10px' }}>
+              {autoStatus.lastResult.status === 'done' ? `✓ último: ${autoStatus.lastResult.title}` : autoStatus.lastResult.status === 'error' ? `⚠ erro: ${autoStatus.lastResult.error}` : ''}
+            </span>
+          )}
+          <button onClick={runNow} disabled={autoStatus.running || autoStatus.pending === 0}
+            style={{ marginLeft: 'auto', background: 'transparent', border: '1px solid #1a2a44', color: autoStatus.running || autoStatus.pending === 0 ? '#333' : '#44aaff', cursor: autoStatus.running || autoStatus.pending === 0 ? 'not-allowed' : 'pointer', fontSize: '9px', padding: '2px 8px', letterSpacing: '0.5px', fontFamily: 'Courier New, monospace' }}>
+            EXECUTAR AGORA
+          </button>
+        </div>
+      )}
+
       {loading ? (
         <p style={{ color: '#333333', fontSize: '11px' }}>CARREGANDO<span className="blink">_</span></p>
       ) : history.length === 0 ? (
@@ -156,34 +247,57 @@ function UploadHistory({ refreshKey }: { refreshKey: number }) {
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
             <thead>
-              <tr>{['THUMB','TÍTULO','DATA','STATUS','VIEWS','LINK',''].map(h => (
+              <tr>{['THUMB','TÍTULO','DATA','STATUS','VIEWS','LINK','SHORT',''].map(h => (
                 <th key={h} style={{ color: '#444444', fontSize: '10px', letterSpacing: '1px', textAlign: 'left', padding: '4px 8px', borderBottom: '1px solid #1a1a1a' }}>{h}</th>
               ))}</tr>
             </thead>
             <tbody>
-              {history.map(e => (
-                <tr key={e.id} style={{ borderBottom: '1px solid #111111' }}>
-                  <td style={{ padding: '6px 8px' }}>
-                    {e.thumbnailUrl ? <img src={e.thumbnailUrl} alt="" style={{ width: 80, height: 45, objectFit: 'cover', border: '1px solid #1a1a1a' }} /> : <div style={{ width: 80, height: 45, background: '#111' }} />}
-                  </td>
-                  <td style={{ color: '#c0c0c0', padding: '6px 8px', maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.title}</td>
-                  <td style={{ color: '#555555', padding: '6px 8px', whiteSpace: 'nowrap' }}>{new Date(e.publishedAt).toLocaleDateString('pt-BR')}</td>
-                  <td style={{ padding: '6px 8px', whiteSpace: 'nowrap' }}>
-                    <span style={{ color: e.status === 'live' ? '#00ff00' : e.status === 'scheduled' ? '#ffaa00' : '#ff4400' }}>
-                      {e.status === 'live' ? '● LIVE' : e.status === 'scheduled' ? '◌ AGENDADO' : '✕ ERRO'}
-                    </span>
-                  </td>
-                  <td style={{ color: '#707070', padding: '6px 8px', textAlign: 'right' }}>{e.views.toLocaleString('pt-BR')}</td>
-                  <td style={{ padding: '6px 8px' }}>
-                    <a href={e.videoUrl} target="_blank" rel="noreferrer" style={{ color: '#00aa00', fontSize: '11px', textDecoration: 'none' }}>▶ YT</a>
-                  </td>
-                  <td style={{ padding: '6px 8px' }}>
-                    <button onClick={() => del(e.id)} style={{ background: 'transparent', border: 'none', color: '#333333', cursor: 'pointer', fontSize: '12px' }}
-                      onMouseEnter={ev => { (ev.currentTarget as HTMLElement).style.color = '#ff4400' }}
-                      onMouseLeave={ev => { (ev.currentTarget as HTMLElement).style.color = '#333333' }}>✕</button>
-                  </td>
-                </tr>
-              ))}
+              {history.map(e => {
+                const hasShort = e.isShort || shortedIds.has(e.title.trim())
+                const isProcessing = creatingShort === e.id
+                return (
+                  <tr key={e.id} style={{ borderBottom: '1px solid #111111' }}>
+                    <td style={{ padding: '6px 8px' }}>
+                      {e.thumbnailUrl ? <img src={e.thumbnailUrl} alt="" style={{ width: 80, height: 45, objectFit: 'cover', border: '1px solid #1a1a1a' }} /> : <div style={{ width: 80, height: 45, background: '#111' }} />}
+                    </td>
+                    <td style={{ color: '#c0c0c0', padding: '6px 8px', maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {e.isShort && <span style={{ color: '#ff6600', fontSize: '9px', border: '1px solid #ff6600', padding: '1px 4px', marginRight: '5px', letterSpacing: '1px' }}>SHORT</span>}
+                      {e.title}
+                    </td>
+                    <td style={{ color: '#555555', padding: '6px 8px', whiteSpace: 'nowrap' }}>{new Date(e.publishedAt).toLocaleDateString('pt-BR')}</td>
+                    <td style={{ padding: '6px 8px', whiteSpace: 'nowrap' }}>
+                      <span style={{ color: e.status === 'live' ? '#00ff00' : e.status === 'scheduled' ? '#ffaa00' : '#ff4400' }}>
+                        {e.status === 'live' ? '● LIVE' : e.status === 'scheduled' ? '◌ AGENDADO' : '✕ ERRO'}
+                      </span>
+                    </td>
+                    <td style={{ color: '#707070', padding: '6px 8px', textAlign: 'right' }}>{e.views.toLocaleString('pt-BR')}</td>
+                    <td style={{ padding: '6px 8px' }}>
+                      <a href={e.videoUrl} target="_blank" rel="noreferrer" style={{ color: '#00aa00', fontSize: '11px', textDecoration: 'none' }}>▶ YT</a>
+                    </td>
+                    <td style={{ padding: '6px 8px', whiteSpace: 'nowrap', minWidth: 90 }}>
+                      {!e.isShort && (
+                        isProcessing ? (
+                          <span style={{ color: '#44aaff', fontSize: '9px', letterSpacing: '0.5px' }}>{shortMsg[e.id] || '...'}</span>
+                        ) : shortMsg[e.id]?.startsWith('✓') ? (
+                          <span style={{ color: '#44aaff', fontSize: '9px' }}>{shortMsg[e.id]}</span>
+                        ) : hasShort ? (
+                          <span style={{ color: '#333', fontSize: '9px', letterSpacing: '0.5px' }}>✓ tem short</span>
+                        ) : (
+                          <button onClick={() => createShort(e)} disabled={!!creatingShort}
+                            style={{ background: 'transparent', border: '1px solid #1a2a44', color: '#44aaff', cursor: creatingShort ? 'not-allowed' : 'pointer', fontSize: '9px', padding: '2px 6px', letterSpacing: '0.5px', fontFamily: 'Courier New, monospace', opacity: creatingShort ? 0.4 : 1 }}>
+                            + SHORT
+                          </button>
+                        )
+                      )}
+                    </td>
+                    <td style={{ padding: '6px 8px' }}>
+                      <button onClick={() => del(e.id)} style={{ background: 'transparent', border: 'none', color: '#333333', cursor: 'pointer', fontSize: '12px' }}
+                        onMouseEnter={ev => { (ev.currentTarget as HTMLElement).style.color = '#ff4400' }}
+                        onMouseLeave={ev => { (ev.currentTarget as HTMLElement).style.color = '#333333' }}>✕</button>
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>
@@ -193,126 +307,164 @@ function UploadHistory({ refreshKey }: { refreshKey: number }) {
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
-export function Scheduler({ onNavigate, presetArtist, onPresetConsumed, marketContext, onMarketContextConsumed }: {
-  onNavigate?: (page: Page) => void
-  presetArtist?: string
-  onPresetConsumed?: () => void
-  marketContext?: MarketContext
-  onMarketContextConsumed?: () => void
-}) {
+export function Scheduler() {
   const [step, setStep] = useState<1|2|3|4>(1)
 
   // ── Etapa 1: files
-  const [videoFile, setVideoFile]     = useState<File | null>(null)
-  const [thumbFile, setThumbFile]     = useState<File | null>(null)
+  const [videoFile, setVideoFile]       = useState<File | null>(null)
+  const [thumbFile, setThumbFile]       = useState<File | null>(null)
   const [thumbPreview, setThumbPreview] = useState<string | null>(null)
-  const [beatName, setBeatName]       = useState(
-    marketContext?.title
-    ?? (marketContext?.artist ? `${marketContext.artist} Type Beat` : undefined)
-    ?? (presetArtist ? `${presetArtist} Type Beat` : '')
-  )
-  const videoInputRef                 = useRef<HTMLInputElement>(null)
-  const thumbInputRef                 = useRef<HTMLInputElement>(null)
+  const [beatName, setBeatName]         = useState('')
+  const videoInputRef                   = useRef<HTMLInputElement>(null)
+  const thumbInputRef                   = useRef<HTMLInputElement>(null)
 
   // ── Etapa 2: AI analysis
-  const [aiStatus, setAiStatus]       = useState<AiStatus>('idle')
-  const [streamText, setStreamText]   = useState('')
-  const [analysis, setAnalysis]       = useState<BeatAnalysis | null>(null)
-  const [aiError, setAiError]         = useState('')
-  const terminalRef                   = useRef<HTMLDivElement>(null)
+  const [aiStatus, setAiStatus]     = useState<AiStatus>('idle')
+  const [streamText, setStreamText] = useState('')
+  const [analysis, setAnalysis]     = useState<BeatAnalysis | null>(null)
+  const [aiError, setAiError]       = useState('')
+  const terminalRef                 = useRef<HTMLDivElement>(null)
 
   // ── Editable fields (populated from analysis, editable by user)
-  const [editTitle, setEditTitle]     = useState('')
-  const [editDesc, setEditDesc]       = useState('')
-  const [editTags, setEditTags]       = useState('')
-  const [editHashtags, setEditHashtags] = useState('')
-  const [scheduledAt, setScheduledAt] = useState('')
+  const [editTitle, setEditTitle]         = useState('')
+  const [editDesc, setEditDesc]           = useState('')
+  const [editTags, setEditTags]           = useState('')
+  const [editHashtags, setEditHashtags]   = useState('')
+  const [scheduledAt, setScheduledAt]     = useState('')
 
   // ── Thumbnail
   const [thumbDataUrl, setThumbDataUrl] = useState<string | null>(null)
 
   // ── Etapa 3: YouTube upload
-  const [uploadPhase, setUploadPhase]     = useState<UploadPhase>('idle')
+  const [uploadPhase, setUploadPhase]       = useState<UploadPhase>('idle')
   const [uploadProgress, setUploadProgress] = useState(0)
-  const [uploadVideoId, setUploadVideoId] = useState<string | null>(null)
-  const [uploadError, setUploadError]     = useState('')
-
-  // ── Etapa 3: Instagram
-  const [igStatus, setIgStatus]       = useState<IgStatus | null>(null)
-  const [igCaption, setIgCaption]     = useState('')
-  const [igPhase, setIgPhase]         = useState<IgPhase>('idle')
-  const [igProgress, setIgProgress]   = useState(0)
-  const [igPermalink, setIgPermalink] = useState('')
-  const [igError, setIgError]         = useState('')
+  const [uploadVideoId, setUploadVideoId]   = useState<string | null>(null)
+  const [uploadError, setUploadError]       = useState('')
+  const [publishShort, setPublishShort]     = useState(true)
+  const [shortStatus, setShortStatus]       = useState<'idle'|'cutting'|'uploading'|'done'|'error'>('idle')
+  const [shortVideoId, setShortVideoId]     = useState<string | null>(null)
 
   // ── Audio detection
-  const [audioStatus, setAudioStatus]   = useState<'idle' | 'detecting' | 'done' | 'error'>('idle')
-  const [detectedBpm, setDetectedBpm]   = useState<number | null>(null)
-  const [detectedKey, setDetectedKey]   = useState<string | null>(null)
-
-  // ── Market context ref (stable across re-renders)
-  const marketCtxRef = useRef<MarketContext | undefined>(marketContext)
+  const [audioStatus, setAudioStatus] = useState<'idle' | 'detecting' | 'done' | 'error'>('idle')
+  const [detectedBpm, setDetectedBpm] = useState<number | null>(null)
+  const [detectedKey, setDetectedKey] = useState<string | null>(null)
+  const [mainArtist, setMainArtist]   = useState<string | null>(null)
 
   // ── History
   const [histRefreshKey, setHistRefreshKey] = useState(0)
 
-  // ── Clear presets from App after reading on mount
+  // ── Agenda integration
+  const [plannedBeats, setPlannedBeats]         = useState<{ id: string; date: string; anchorArtist: string; beatName: string; secondaryArtist: string; filenameTemplate: string }[]>([])
+  const [selectedPlanId, setSelectedPlanId]     = useState<string | null>(null)
+  const [plannedSecondary, setPlannedSecondary] = useState<string | null>(null)
+
   useEffect(() => {
-    if (presetArtist)  onPresetConsumed?.()
-    if (marketContext) onMarketContextConsumed?.()
-  }, []) // eslint-disable-line
+    fetch('/api/schedule')
+      .then(r => r.ok ? r.json() : [])
+      .then((data: { id: string; date: string; anchorArtist: string; beatName: string; secondaryArtist: string; filenameTemplate: string; status: string }[]) =>
+        setPlannedBeats(data.filter(e => e.status === 'planned').sort((a, b) => a.date.localeCompare(b.date)))
+      )
+      .catch(() => {})
+  }, [])
 
   // ── Published links (etapa 4)
   const [publishedYt, setPublishedYt] = useState<string | null>(null)
-  const [publishedIg, setPublishedIg] = useState<string | null>(null)
 
-  // ── Thumbnail AI prompt (feature 3)
-  const [thumbPrompt, setThumbPrompt]           = useState('')
+  // ── Thumbnail AI prompt
+  const [thumbPrompt, setThumbPrompt]               = useState('')
   const [thumbPromptLoading, setThumbPromptLoading] = useState(false)
 
-  // Load Instagram status
-  useEffect(() => {
-    fetch('/api/instagram/auth/status').then(r => r.ok ? r.json() : null).then(d => { if (d) setIgStatus(d) }).catch(() => {})
-    const params = new URLSearchParams(window.location.search)
-    if (params.has('instagram_auth')) {
-      fetch('/api/instagram/auth/status').then(r => r.ok ? r.json() : null).then(d => { if (d) setIgStatus(d) }).catch(() => {})
-      window.history.replaceState({}, '', window.location.pathname)
-    }
-  }, [])
+  // Parse filename to extract clean beat name, BPM, and key.
+  // Handles patterns like: "YT [FREE] Hurricane Wisdom Type Beat 2026 - My Truth 176bpm F MAJOR.mp4"
+  function parseFilename(filename: string): { beatName: string; mainArtist: string | null; bpm: number | null; key: string | null } {
+    let raw = filename.replace(/\.[^.]+$/, '') // remove extension
 
-  // Auto-populate captions from analysis
-  useEffect(() => {
-    if (!analysis) return
-    const firstLine = analysis.description.split('\n').find(l => l.trim()) || ''
-    setIgCaption(firstLine.trim())
-  }, [analysis])
+    // Extract BPM: "176bpm", "176 BPM", "176 bpm"
+    let bpm: number | null = null
+    const bpmMatch = raw.match(/\b(\d{2,3})\s*bpm\b/i)
+    if (bpmMatch) {
+      const v = parseInt(bpmMatch[1])
+      if (v >= 60 && v <= 300) { bpm = v; raw = raw.replace(bpmMatch[0], ' ') }
+    }
+
+    // Extract key: "F MAJOR", "F# Minor", "Am", "C#m", "FM", "Fm"
+    let key: string | null = null
+    const keyPatterns: RegExp[] = [
+      /\b([A-G][#b]?)\s+(major|minor)\b/i,
+      /\b([A-G][#b]?)\s+(maj|min)\b/i,
+      /\b([A-G][#b])(m)\b/,     // Am, C#m — lowercase m = minor
+      /\b([A-G][#b]?)(M)\b/,    // CM, FM — uppercase M = major
+    ]
+    for (const pat of keyPatterns) {
+      const m = raw.match(pat)
+      if (m) {
+        const note = m[1]
+        const modeStr = m[2]
+        const isMinor = /^(minor|min|m)$/i.test(modeStr) && modeStr !== 'M'
+        key = `${note} ${isMinor ? 'Minor' : 'Major'}`
+        raw = raw.replace(m[0], ' ')
+        break
+      }
+    }
+
+    raw = raw.replace(/\s+/g, ' ').trim()
+
+    const NOISE = (s: string) => s
+      .replace(/\[?free\]?/gi, '')
+      .replace(/\byt\b/gi, '')
+      .replace(/\btype\s+beat\b/gi, '')
+      .replace(/\b20\d\d\b/g, '')
+      .replace(/^[-\s]+|[-\s]+$/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+
+    // Split on " - ": part before = artist reference, part after = beat name
+    const dashParts = raw.split(' - ')
+    let beatName: string
+    let mainArtist: string | null = null
+
+    if (dashParts.length > 1) {
+      beatName   = NOISE(dashParts[dashParts.length - 1])
+      mainArtist = NOISE(dashParts.slice(0, -1).join(' - ')) || null
+    } else {
+      beatName = NOISE(raw)
+    }
+
+    if (!beatName) beatName = NOISE(raw) || raw
+
+    return { beatName, mainArtist, bpm, key }
+  }
 
   // Handle video selection — extract beat name + start audio detection
   async function onVideoSelect(file: File) {
     setVideoFile(file)
-    const name = file.name
-      .replace(/\.[^.]+$/, '')        // remove extension
-      .replace(/[-_]/g, ' ')          // underscores/dashes → spaces
-      .replace(/\s+/g, ' ').trim()
-    setBeatName(name)
 
+    const { beatName: parsedName, mainArtist: parsedArtist, bpm: parsedBpm, key: parsedKey } = parseFilename(file.name)
+    // Keep plan values if one is selected — only update from filename if no plan is active
+    if (!selectedPlanId) setBeatName(parsedName)
+    if (!selectedPlanId) setMainArtist(parsedArtist)
+
+    // Apply filename values immediately — producer named the file correctly
+    setDetectedBpm(parsedBpm)
+    setDetectedKey(parsedKey)
     setAudioStatus('detecting')
-    setDetectedBpm(null)
-    setDetectedKey(null)
+
     try {
       const result = await analyzeAudio(file)
-      setDetectedBpm(result.bpm)
-      setDetectedKey(result.key)
+      // Filename values win; audio fills only what the filename didn't have
+      setDetectedBpm(parsedBpm !== null ? parsedBpm : result.bpm)
+      setDetectedKey(parsedKey !== null ? parsedKey : result.key)
       setAudioStatus('done')
     } catch {
-      setAudioStatus('error')
+      // Keep filename values if available, otherwise mark error
+      setAudioStatus(parsedBpm !== null || parsedKey !== null ? 'done' : 'error')
     }
   }
 
   // Auto-trigger AI analysis once audio detection finishes
   useEffect(() => {
     if ((audioStatus === 'done' || audioStatus === 'error') && beatName.trim() && aiStatus === 'idle') {
-      analyze(beatName.trim(), detectedBpm, detectedKey)
+      analyze(beatName.trim(), detectedBpm, detectedKey, mainArtist, plannedSecondary)
     }
   }, [audioStatus]) // eslint-disable-line
 
@@ -329,7 +481,7 @@ export function Scheduler({ onNavigate, presetArtist, onPresetConsumed, marketCo
   }
 
   // ── AI Analysis
-  const analyze = useCallback(async (name: string, bpm: number | null = null, key: string | null = null) => {
+  const analyze = useCallback(async (name: string, bpm: number | null = null, key: string | null = null, artist: string | null = null, secondary: string | null = null) => {
     if (!name.trim() || aiStatus === 'loading') return
     setAiStatus('loading')
     setStreamText('')
@@ -342,7 +494,7 @@ export function Scheduler({ onNavigate, presetArtist, onPresetConsumed, marketCo
       const res = await fetch('/api/ai/analyze-beat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ beatName: name, bpm, key, marketContext: marketCtxRef.current ?? null }),
+        body: JSON.stringify({ beatName: name, bpm, key, mainArtist: artist, secondaryArtist: secondary }),
       })
       if (!res.ok) {
         const body = await res.json().catch(() => ({}))
@@ -397,7 +549,7 @@ export function Scheduler({ onNavigate, presetArtist, onPresetConsumed, marketCo
     setUploadError('')
     setUploadVideoId(null)
 
-    const tags = editTags.split(',').map(t => t.trim()).filter(Boolean)
+    const tags     = editTags.split(',').map(t => t.trim()).filter(Boolean)
     const hashtags = editHashtags.split(/\s+/).filter(t => t.startsWith('#'))
 
     try {
@@ -408,7 +560,8 @@ export function Scheduler({ onNavigate, presetArtist, onPresetConsumed, marketCo
         description:      editDesc + (hashtags.length ? '\n\n' + hashtags.join(' ') : ''),
         tags,
         thumbnailDataUrl: thumbDataUrl,
-        scheduledAt:      scheduledAt || undefined,
+        scheduledAt:      scheduledAt ? new Date(scheduledAt).toISOString() : undefined,
+        publishShort,
       }))
 
       const res = await fetch('/api/upload/video', { method: 'POST', body: formData })
@@ -434,78 +587,39 @@ export function Scheduler({ onNavigate, presetArtist, onPresetConsumed, marketCo
           if (payload === '[DONE]') break outer
           try {
             const evt = JSON.parse(payload)
-            if (evt.status === 'UPLOADING')   setUploadProgress(evt.progress)
-            if (evt.status === 'PROCESSING')  setUploadPhase('processing')
+            if (evt.status === 'UPLOADING')  setUploadProgress(evt.progress)
+            if (evt.status === 'PROCESSING') setUploadPhase('processing')
             if (evt.status === 'LIVE' || evt.status === 'SCHEDULED') {
               setUploadPhase('done')
               setUploadVideoId(evt.videoId)
               setPublishedYt(`https://youtu.be/${evt.videoId}`)
               setHistRefreshKey(k => k + 1)
               setStep(4)
+              // Mark planned beat as posted
+              if (selectedPlanId) {
+                fetch(`/api/schedule/${selectedPlanId}`, {
+                  method: 'PATCH',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ status: 'posted' }),
+                }).catch(() => {})
+                setPlannedBeats(p => p.filter(e => e.id !== selectedPlanId))
+                setSelectedPlanId(null)
+              }
             }
+            if (evt.status === 'SHORT_CUTTING')   setShortStatus('cutting')
+            if (evt.status === 'SHORT_UPLOADING') setShortStatus('uploading')
+            if (evt.status === 'SHORT_DONE') {
+              setShortStatus('done')
+              setShortVideoId(evt.shortVideoId)
+              setHistRefreshKey(k => k + 1)
+            }
+            if (evt.status === 'SHORT_ERROR') setShortStatus('error')
             if (evt.status === 'ERROR') throw new Error(evt.error || 'Upload failed')
           } catch (e) { if (!(e instanceof SyntaxError)) throw e }
         }
       }
     } catch (err: any) { setUploadError(err.message); setUploadPhase('error') }
-  }, [videoFile, analysis, editTitle, editDesc, editTags, editHashtags, thumbDataUrl, scheduledAt, uploadPhase])
-
-  // ── Instagram upload
-  const handleIgUpload = useCallback(async () => {
-    if (!videoFile || igPhase !== 'idle') return
-    setIgPhase('creating'); setIgProgress(10); setIgError(''); setIgPermalink('')
-
-    const hashtags = editHashtags.split(/\s+/).filter(t => t.startsWith('#'))
-
-    try {
-      const formData = new FormData()
-      formData.append('video', videoFile)
-      formData.append('meta', JSON.stringify({ caption: igCaption, hashtags }))
-
-      const res = await fetch('/api/instagram/upload', { method: 'POST', body: formData })
-      if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b.error || `HTTP ${res.status}`) }
-
-      const reader  = res.body!.getReader()
-      const decoder = new TextDecoder()
-      let rawBuf = ''
-
-      outer: while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        rawBuf += decoder.decode(value, { stream: true })
-        const lines = rawBuf.split('\n')
-        rawBuf = lines.pop() ?? ''
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue
-          const payload = line.slice(6).trim()
-          if (payload === '[DONE]') break outer
-          try {
-            const evt = JSON.parse(payload)
-            if (evt.status === 'CREATING_CONTAINER') { setIgPhase('creating');   setIgProgress(10) }
-            if (evt.status === 'PROCESSING')         { setIgPhase('processing'); setIgProgress(evt.progress ?? 40) }
-            if (evt.status === 'PUBLISHING')         { setIgPhase('publishing'); setIgProgress(90) }
-            if (evt.status === 'DONE')               {
-              setIgPhase('done'); setIgProgress(100)
-              setIgPermalink(evt.permalink || '')
-              setPublishedIg(evt.permalink || '')
-              setStep(4)
-            }
-            if (evt.status === 'ERROR') throw new Error(evt.error || 'Erro Instagram')
-          } catch (e) { if (!(e instanceof SyntaxError)) throw e }
-        }
-      }
-    } catch (err: any) { setIgError(err.message); setIgPhase('error') }
-  }, [videoFile, igCaption, editHashtags, igPhase])
-
-  const connectInstagram = useCallback(async () => {
-    try {
-      const origin = window.location.origin + window.location.pathname
-      const r = await fetch(`/api/instagram/auth/url?origin=${encodeURIComponent(origin)}`)
-      if (!r.ok) return
-      const { url } = await r.json()
-      window.location.href = url
-    } catch {}
-  }, [])
+  }, [videoFile, analysis, editTitle, editDesc, editTags, editHashtags, thumbDataUrl, scheduledAt, uploadPhase, publishShort, selectedPlanId])
 
   // ── Thumbnail AI prompt generator
   const generateThumbPrompt = useCallback(async () => {
@@ -547,11 +661,11 @@ export function Scheduler({ onNavigate, presetArtist, onPresetConsumed, marketCo
   function reset() {
     setStep(1); setVideoFile(null); setThumbFile(null); setThumbPreview(null); setBeatName('')
     setAiStatus('idle'); setStreamText(''); setAnalysis(null); setAiError('')
-    setAudioStatus('idle'); setDetectedBpm(null); setDetectedKey(null)
+    setAudioStatus('idle'); setDetectedBpm(null); setDetectedKey(null); setMainArtist(null)
     setEditTitle(''); setEditDesc(''); setEditTags(''); setEditHashtags(''); setScheduledAt('')
     setThumbDataUrl(null); setUploadPhase('idle'); setUploadVideoId(null); setUploadError('')
-    setIgPhase('idle'); setIgProgress(0); setIgPermalink(''); setIgError('')
-    setPublishedYt(null); setPublishedIg(null)
+    setShortStatus('idle'); setShortVideoId(null); setSelectedPlanId(null); setPlannedSecondary(null)
+    setPublishedYt(null)
     setThumbPrompt(''); setThumbPromptLoading(false)
   }
 
@@ -566,32 +680,6 @@ export function Scheduler({ onNavigate, presetArtist, onPresetConsumed, marketCo
 
       <StepIndicator step={step} />
 
-      {/* ── Market context badge ── */}
-      {marketCtxRef.current && (
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap',
-          padding: '10px 14px',
-          backgroundColor: '#050f05',
-          border: '1px solid #1a4a1a',
-          borderLeft: '3px solid #00ff00',
-        }}>
-          <span style={{ color: '#00ff00', fontSize: '10px', letterSpacing: '1.5px', flexShrink: 0 }}>📡 BASEADO NO MERCADO</span>
-          <span style={{ color: '#555555', fontSize: '10px' }}>·</span>
-          <span style={{ color: '#00cc00', fontSize: '10px', fontWeight: 'bold' }}>{marketCtxRef.current.artist}</span>
-          <span style={{ color: '#555555', fontSize: '10px' }}>·</span>
-          <span style={{ color: '#777777', fontSize: '10px' }}>{marketCtxRef.current.niche}</span>
-          <span style={{ color: '#555555', fontSize: '10px' }}>·</span>
-          <span style={{ color: '#777777', fontSize: '10px' }}>{marketCtxRef.current.hotMarket.replace(/\{[\s\S]*\}/, '').slice(0, 40)}</span>
-          {(marketCtxRef.current.bpm || marketCtxRef.current.key) && (
-            <>
-              <span style={{ color: '#555555', fontSize: '10px' }}>·</span>
-              {marketCtxRef.current.bpm && <span style={{ color: '#444444', fontSize: '10px', border: '1px solid #1a3a1a', padding: '1px 5px' }}>{marketCtxRef.current.bpm} BPM</span>}
-              {marketCtxRef.current.key && <span style={{ color: '#444444', fontSize: '10px', border: '1px solid #1a3a1a', padding: '1px 5px' }}>{marketCtxRef.current.key}</span>}
-            </>
-          )}
-        </div>
-      )}
-
       {/* ══════════════════════════════════════════════════════════
           ETAPA 1 — UPLOAD
       ══════════════════════════════════════════════════════════ */}
@@ -600,34 +688,48 @@ export function Scheduler({ onNavigate, presetArtist, onPresetConsumed, marketCo
           ┌─ ETAPA 1 · UPLOAD DO BEAT ───────────────────────────────
         </p>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '12px' }}>
-
-          {/* Market context quick-analyze (no video needed) */}
-          {marketCtxRef.current && !videoFile && aiStatus === 'idle' && (
-            <div style={{ gridColumn: '1 / -1', padding: '12px', backgroundColor: '#050f05', border: '1px solid #1a4a1a', marginBottom: '4px' }}>
-              <p style={{ ...dim, marginBottom: '8px' }}>NOME DO BEAT · pré-preenchido pelo MERCADO · editável</p>
-              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                <span style={{ color: '#00ff00', fontSize: '13px', flexShrink: 0 }}>&gt;</span>
-                <input
-                  value={beatName}
-                  onChange={e => setBeatName(e.target.value)}
-                  style={{ ...fieldStyle, borderBottom: '2px solid #00ff00', flex: 1 }}
-                />
+        {/* Planned beats selector */}
+        {plannedBeats.length > 0 && (
+          <div style={{ marginBottom: '14px', padding: '10px', border: '1px solid #2a1a44', backgroundColor: '#0d0818' }}>
+            <p style={{ color: '#cc88ff', fontSize: '10px', letterSpacing: '1px', margin: '0 0 8px' }}>◈ BEATS PLANEADOS NA AGENDA</p>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+              {plannedBeats.slice(0, 7).map(plan => (
                 <button
-                  onClick={() => analyze(beatName.trim(), null, null)}
-                  disabled={!beatName.trim()}
-                  style={{ ...retro, color: '#00ff00', border: '1px solid #00ff00', flexShrink: 0, padding: '6px 14px', opacity: beatName.trim() ? 1 : 0.4 }}
-                  onMouseEnter={e => { if (beatName.trim()) (e.currentTarget as HTMLElement).style.backgroundColor = '#001a00' }}
-                  onMouseLeave={e => { (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent' }}
+                  key={plan.id}
+                  onClick={() => {
+                    if (selectedPlanId === plan.id) {
+                      setSelectedPlanId(null)
+                      setBeatName('')
+                      setMainArtist(null)
+                      setPlannedSecondary(null)
+                    } else {
+                      setSelectedPlanId(plan.id)
+                      setBeatName(plan.beatName)
+                      setMainArtist(plan.anchorArtist)
+                      setPlannedSecondary(plan.secondaryArtist)
+                    }
+                  }}
+                  style={{
+                    background: selectedPlanId === plan.id ? '#2a1a44' : 'transparent',
+                    border: `1px solid ${selectedPlanId === plan.id ? '#cc88ff' : '#2a1a44'}`,
+                    color: selectedPlanId === plan.id ? '#cc88ff' : '#666',
+                    cursor: 'pointer', fontFamily: 'JetBrains Mono, monospace',
+                    fontSize: '10px', padding: '3px 10px', letterSpacing: '0.5px',
+                  }}
                 >
-                  [ ANALISAR COM MERCADO ]
+                  {plan.date.slice(5)} · "{plan.beatName}"
                 </button>
-              </div>
-              <p style={{ color: '#2a2a2a', fontSize: '10px', margin: '6px 0 0', letterSpacing: '0.5px' }}>
-                Podes analisar sem vídeo · adiciona o vídeo depois para publicar
-              </p>
+              ))}
             </div>
-          )}
+            {selectedPlanId && (
+              <p style={{ color: '#5a3a77', fontSize: '9px', margin: '6px 0 0', letterSpacing: '0.5px' }}>
+                ◈ Selecionado — será marcado como feito após publicar
+              </p>
+            )}
+          </div>
+        )}
+
+        <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '12px' }}>
 
           {/* Video drop zone */}
           <div>
@@ -671,21 +773,45 @@ export function Scheduler({ onNavigate, presetArtist, onPresetConsumed, marketCo
                     style={{ ...fieldStyle, borderBottom: '2px solid #00ff00' }}
                   />
                   {aiStatus === 'idle' && beatName.trim() && (
-                    <button onClick={() => analyze(beatName.trim(), detectedBpm, detectedKey)} style={{ ...retro, color: '#00ff00', border: '1px solid #00ff00', flexShrink: 0, padding: '6px 12px' }}>[ RE-ANALISAR ]</button>
+                    <button onClick={() => analyze(beatName.trim(), detectedBpm, detectedKey, mainArtist, plannedSecondary)} style={{ ...retro, color: '#00ff00', border: '1px solid #00ff00', flexShrink: 0, padding: '6px 12px' }}>[ RE-ANALISAR ]</button>
                   )}
                 </div>
-                {/* Audio detection indicator */}
                 {audioStatus === 'detecting' && (
                   <p style={{ color: '#ffaa00', fontSize: '10px', margin: '6px 0 0', letterSpacing: '1px' }}>
                     ● DETECTANDO BPM/KEY<span className="blink">_</span>
                   </p>
                 )}
                 {audioStatus === 'done' && (
-                  <div style={{ display: 'flex', gap: '6px', alignItems: 'center', marginTop: '6px' }}>
-                    <span style={{ color: '#00ff00', fontSize: '10px', letterSpacing: '1px' }}>● ÁUDIO</span>
-                    {detectedBpm && <span style={{ color: '#00ff00', fontSize: '10px', border: '1px solid #1a3a1a', padding: '1px 6px' }}>{detectedBpm} BPM</span>}
-                    {detectedKey && <span style={{ color: '#00ff00', fontSize: '10px', border: '1px solid #1a3a1a', padding: '1px 6px' }}>{detectedKey}</span>}
-                    {!detectedBpm && !detectedKey && <span style={{ color: '#555555', fontSize: '10px' }}>sem resultado</span>}
+                  <div style={{ marginTop: '8px' }}>
+                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center', marginBottom: '6px' }}>
+                      <span style={{ color: '#00ff00', fontSize: '10px', letterSpacing: '1px' }}>● ÁUDIO DETECTADO · editável</span>
+                    </div>
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <span style={{ color: '#444', fontSize: '10px', letterSpacing: '1px' }}>BPM</span>
+                        <input
+                          type="number"
+                          value={detectedBpm ?? ''}
+                          onChange={e => setDetectedBpm(e.target.value ? parseInt(e.target.value) : null)}
+                          style={{ width: 60, backgroundColor: '#0a0a0a', border: '1px solid #1a3a1a', color: '#00ff00', fontSize: '11px', padding: '2px 6px', fontFamily: 'JetBrains Mono, monospace', textAlign: 'center' }}
+                          min={60} max={300}
+                        />
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <span style={{ color: '#444', fontSize: '10px', letterSpacing: '1px' }}>TOM</span>
+                        <select
+                          value={detectedKey ?? ''}
+                          onChange={e => setDetectedKey(e.target.value || null)}
+                          style={{ backgroundColor: '#0a0a0a', border: '1px solid #1a3a1a', color: '#00ff00', fontSize: '11px', padding: '2px 4px', fontFamily: 'JetBrains Mono, monospace' }}
+                        >
+                          <option value="">--</option>
+                          {['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'].flatMap(n => [
+                            <option key={n+'M'} value={`${n} Major`}>{n} Major</option>,
+                            <option key={n+'m'} value={`${n} Minor`}>{n} Minor</option>,
+                          ])}
+                        </select>
+                      </div>
+                    </div>
                   </div>
                 )}
                 {audioStatus === 'error' && (
@@ -753,7 +879,6 @@ export function Scheduler({ onNavigate, presetArtist, onPresetConsumed, marketCo
             ┌─ ETAPA 2 · LAIS A ANALISAR · {aiStatus === 'loading' ? 'PROCESSANDO...' : aiStatus === 'done' ? 'COMPLETO ✓' : 'ERRO'}
           </p>
 
-          {/* Streaming terminal */}
           {streamText && (
             <div ref={terminalRef} style={{
               backgroundColor: '#060606', border: '1px solid #1a1a1a', padding: '8px 10px',
@@ -767,11 +892,10 @@ export function Scheduler({ onNavigate, presetArtist, onPresetConsumed, marketCo
             </div>
           )}
 
-          {/* Error */}
           {aiStatus === 'error' && (
             <div>
               <p style={{ color: '#ff4400', fontSize: '11px', margin: '0 0 8px' }}>⚠ {aiError}</p>
-              <button onClick={() => analyze(beatName.trim(), detectedBpm, detectedKey)} style={{ ...retro, color: '#ff6600', border: '1px solid #333333' }}
+              <button onClick={() => analyze(beatName.trim(), detectedBpm, detectedKey, mainArtist, plannedSecondary)} style={{ ...retro, color: '#ff6600', border: '1px solid #333333' }}
                 onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = '#c0c0c0' }}
                 onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = '#ff6600' }}>
                 [ TENTAR NOVAMENTE ]
@@ -779,7 +903,6 @@ export function Scheduler({ onNavigate, presetArtist, onPresetConsumed, marketCo
             </div>
           )}
 
-          {/* Editable results */}
           {showResults && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
 
@@ -930,7 +1053,7 @@ export function Scheduler({ onNavigate, presetArtist, onPresetConsumed, marketCo
               {/* Re-analyze button */}
               <div style={{ textAlign: 'center' }}>
                 <button
-                  onClick={() => analyze(beatName.trim(), detectedBpm, detectedKey)}
+                  onClick={() => analyze(beatName.trim(), detectedBpm, detectedKey, mainArtist, plannedSecondary)}
                   style={{ ...retro, color: '#00aa00', border: '1px solid #1a3a1a', padding: '8px 20px', fontSize: '11px' }}
                   onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = '#00ff00'; (e.currentTarget as HTMLElement).style.borderColor = '#00aa00' }}
                   onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = '#00aa00'; (e.currentTarget as HTMLElement).style.borderColor = '#1a3a1a' }}
@@ -940,50 +1063,6 @@ export function Scheduler({ onNavigate, presetArtist, onPresetConsumed, marketCo
                 <p style={{ color: '#2a2a2a', fontSize: '9px', margin: '4px 0 0', letterSpacing: '1px' }}>IA usa ângulo diferente a cada análise · nunca repete</p>
               </div>
 
-              {/* Beat Store button */}
-              {onNavigate && (
-                <div style={{ borderTop: '1px solid #1a1a1a', paddingTop: '14px', textAlign: 'center' }}>
-                  <button
-                    onClick={() => {
-                      try {
-                        localStorage.setItem('beatstore_prefill', JSON.stringify({
-                          beatName,
-                          title: editTitle,
-                          description: editDesc,
-                          tags: editTags,
-                          hashtags: editHashtags,
-                          bpm: detectedBpm,
-                          key: detectedKey,
-                          thumbnail: thumbDataUrl,
-                        }))
-                      } catch { /* quota exceeded — proceed without thumbnail */
-                        try {
-                          localStorage.setItem('beatstore_prefill', JSON.stringify({
-                            beatName, title: editTitle, description: editDesc,
-                            tags: editTags, hashtags: editHashtags,
-                            bpm: detectedBpm, key: detectedKey, thumbnail: null,
-                          }))
-                        } catch {}
-                      }
-                      onNavigate('beatstore')
-                    }}
-                    style={{
-                      padding: '12px 32px', backgroundColor: '#0a1500', color: '#aaff00',
-                      border: '2px solid #aaff00', cursor: 'pointer',
-                      fontFamily: 'Courier New, monospace', fontSize: '13px',
-                      fontWeight: 'bold', letterSpacing: '2px',
-                      boxShadow: '0 0 12px rgba(170,255,0,0.15)',
-                    }}
-                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.backgroundColor = '#142000'; (e.currentTarget as HTMLElement).style.boxShadow = '0 0 20px rgba(170,255,0,0.3)' }}
-                    onMouseLeave={e => { (e.currentTarget as HTMLElement).style.backgroundColor = '#0a1500'; (e.currentTarget as HTMLElement).style.boxShadow = '0 0 12px rgba(170,255,0,0.15)' }}
-                  >
-                    [ ABRIR NO BEAT STORE ]
-                  </button>
-                  <p style={{ color: '#2a2a2a', fontSize: '9px', margin: '6px 0 0', letterSpacing: '1px' }}>
-                    Envia para BeatStars com todos os dados pré-preenchidos
-                  </p>
-                </div>
-              )}
             </div>
           )}
         </div>
@@ -1002,14 +1081,13 @@ export function Scheduler({ onNavigate, presetArtist, onPresetConsumed, marketCo
 
             {(uploadPhase === 'idle' || uploadPhase === 'error') && (
               <>
-                {/* Metadata summary */}
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '10px', marginBottom: '14px' }}>
                   <tbody>
                     {[
-                      ['TÍTULO',     editTitle],
-                      ['TAGS',       `${editTags.split(',').filter(t => t.trim()).length} tags`],
-                      ['HASHTAGS',   `${editHashtags.split(/\s+/).filter(t => t.startsWith('#')).length} hashtags`],
-                      ['THUMBNAIL',  thumbDataUrl ? '✓ Pronta (1280×720)' : '✗ Sem thumbnail'],
+                      ['TÍTULO',    editTitle],
+                      ['TAGS',      `${editTags.split(',').filter(t => t.trim()).length} tags`],
+                      ['HASHTAGS',  `${editHashtags.split(/\s+/).filter(t => t.startsWith('#')).length} hashtags`],
+                      ['THUMBNAIL', thumbDataUrl ? '✓ Pronta (1280×720)' : '✗ Sem thumbnail'],
                     ].map(([k, v]) => (
                       <tr key={k} style={{ borderBottom: '1px solid #111111' }}>
                         <td style={{ color: '#444444', padding: '5px 8px', width: '110px', whiteSpace: 'nowrap', letterSpacing: '1px' }}>{k}</td>
@@ -1019,7 +1097,6 @@ export function Scheduler({ onNavigate, presetArtist, onPresetConsumed, marketCo
                   </tbody>
                 </table>
 
-                {/* Schedule */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '14px' }}>
                   <span style={dim}>AGENDAR PARA</span>
                   <input type="datetime-local" value={scheduledAt} onChange={e => setScheduledAt(e.target.value)}
@@ -1027,13 +1104,30 @@ export function Scheduler({ onNavigate, presetArtist, onPresetConsumed, marketCo
                   {scheduledAt && <button onClick={() => setScheduledAt('')} style={{ ...retro, border: 'none', color: '#444' }}>✕</button>}
                 </div>
 
-                <button onClick={handleUpload} disabled={!videoFile}
+                {/* Short toggle */}
+                <div
+                  onClick={() => setPublishShort(v => !v)}
+                  style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '14px', cursor: 'pointer', userSelect: 'none' }}
+                >
+                  <div style={{
+                    width: 14, height: 14, border: `1px solid ${publishShort ? '#44aaff' : '#333'}`,
+                    backgroundColor: publishShort ? '#44aaff' : 'transparent',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                  }}>
+                    {publishShort && <span style={{ color: '#000', fontSize: '10px', fontWeight: 'bold', lineHeight: 1 }}>✓</span>}
+                  </div>
+                  <span style={{ color: publishShort ? '#44aaff' : '#555', fontSize: '11px', letterSpacing: '1px' }}>
+                    PUBLICAR TAMBÉM COMO SHORT (60 seg automático)
+                  </span>
+                </div>
+
+                <button onClick={handleUpload} disabled={!videoFile || uploadPhase !== 'idle'}
                   style={{
                     width: '100%', padding: '12px',
-                    backgroundColor: videoFile ? '#00ff00' : '#111111',
-                    color: videoFile ? '#000000' : '#333333',
-                    border: videoFile ? 'none' : '1px solid #222222',
-                    cursor: videoFile ? 'pointer' : 'not-allowed',
+                    backgroundColor: videoFile && uploadPhase === 'idle' ? '#00ff00' : '#111111',
+                    color: videoFile && uploadPhase === 'idle' ? '#000000' : '#333333',
+                    border: videoFile && uploadPhase === 'idle' ? 'none' : '1px solid #222222',
+                    cursor: videoFile && uploadPhase === 'idle' ? 'pointer' : 'not-allowed',
                     fontFamily: 'Courier New, monospace', fontSize: '13px', fontWeight: 'bold', letterSpacing: '2px',
                   }}>
                   {scheduledAt ? '[ AGENDAR NO YOUTUBE ]' : '[ PUBLICAR NO YOUTUBE ]'}
@@ -1087,87 +1181,6 @@ export function Scheduler({ onNavigate, presetArtist, onPresetConsumed, marketCo
             )}
           </div>
 
-          {/* ── Instagram ── */}
-          <div style={panel}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-              <p style={{ color: '#e1306c', fontSize: '11px', letterSpacing: '1px', margin: 0, opacity: 0.9 }}>
-                ┌─ PUBLICAR NO INSTAGRAM · REELS
-              </p>
-              {igStatus?.authenticated && (
-                <span style={{ color: '#444444', fontSize: '10px' }}>
-                  @{igStatus.username}
-                  {igStatus.daysLeft != null && <span style={{ color: igStatus.daysLeft < 10 ? '#ff6600' : '#333333', marginLeft: '6px' }}>· token {igStatus.daysLeft}d</span>}
-                </span>
-              )}
-            </div>
-
-            {igStatus === null && <p style={{ color: '#333333', fontSize: '11px' }}>VERIFICANDO<span className="blink">_</span></p>}
-
-            {igStatus && !igStatus.authenticated && (
-              <div style={{ textAlign: 'center', padding: '14px 0' }}>
-                <p style={{ color: '#555555', fontSize: '10px', margin: '0 0 10px', letterSpacing: '1px' }}>CONTA NÃO CONECTADA</p>
-                <button onClick={connectInstagram}
-                  style={{ padding: '10px 24px', backgroundColor: '#e1306c', color: '#ffffff', border: 'none', cursor: 'pointer', fontFamily: 'Courier New, monospace', fontSize: '12px', fontWeight: 'bold', letterSpacing: '1px' }}>
-                  [ CONECTAR INSTAGRAM ]
-                </button>
-                <p style={{ color: '#2a2a2a', fontSize: '10px', margin: '8px 0 0' }}>Requer conta Business + Facebook Page</p>
-              </div>
-            )}
-
-            {igStatus?.authenticated && (igPhase === 'idle' || igPhase === 'error') && (
-              <>
-                {igStatus.warning && <p style={{ color: '#ff6600', fontSize: '10px', margin: '0 0 10px' }}>⚠ {igStatus.warning}</p>}
-                <div style={{ marginBottom: '10px' }}>
-                  <p style={dim}>LEGENDA · auto-populada · editável</p>
-                  <textarea value={igCaption} onChange={e => setIgCaption(e.target.value)} rows={3}
-                    style={{ ...fieldStyle, resize: 'vertical' }} placeholder="Legenda do Reel..." />
-                </div>
-                {editHashtags.split(/\s+/).filter(t => t.startsWith('#')).length > 0 && (
-                  <div style={{ marginBottom: '12px' }}>
-                    <p style={dim}>HASHTAGS (auto)</p>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
-                      {editHashtags.split(/\s+/).filter(t => t.startsWith('#')).map((h, i) => <Chip key={i} text={h} accent />)}
-                    </div>
-                  </div>
-                )}
-                <button onClick={handleIgUpload} disabled={!videoFile}
-                  style={{
-                    width: '100%', padding: '12px',
-                    backgroundColor: videoFile ? '#e1306c' : '#1a1a1a',
-                    color: videoFile ? '#ffffff' : '#333333',
-                    border: videoFile ? 'none' : '1px solid #222222',
-                    cursor: videoFile ? 'pointer' : 'not-allowed',
-                    fontFamily: 'Courier New, monospace', fontSize: '13px', fontWeight: 'bold', letterSpacing: '2px',
-                  }}>
-                  [ PUBLICAR REEL NO INSTAGRAM ]
-                </button>
-                {igPhase === 'error' && <p style={{ color: '#ff4400', fontSize: '10px', margin: '8px 0 0' }}>⚠ {igError}</p>}
-              </>
-            )}
-
-            {igStatus?.authenticated && (igPhase === 'creating' || igPhase === 'processing' || igPhase === 'publishing') && (
-              <div style={{ padding: '8px 0' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
-                  <span style={{ color: '#e1306c', fontSize: '11px', letterSpacing: '1px' }}>
-                    {igPhase === 'creating' ? 'CRIANDO CONTAINER' : igPhase === 'processing' ? 'INSTAGRAM PROCESSANDO' : 'PUBLICANDO REEL'}<span className="blink">_</span>
-                  </span>
-                  <span style={{ color: '#ffffff', fontSize: '13px', fontWeight: 'bold' }}>{igProgress}%</span>
-                </div>
-                <div style={{ backgroundColor: '#111111', height: '8px', border: '1px solid #1a1a1a' }}>
-                  <div style={{ width: `${igProgress}%`, height: '100%', backgroundColor: '#e1306c', transition: 'width 0.5s' }} />
-                </div>
-                {igPhase === 'processing' && <p style={{ color: '#333333', fontSize: '10px', margin: '6px 0 0' }}>pode demorar até 5 minutos...</p>}
-              </div>
-            )}
-
-            {igPhase === 'done' && (
-              <div style={{ textAlign: 'center', padding: '12px 0' }}>
-                <p style={{ color: '#e1306c', fontSize: '13px', fontWeight: 'bold', letterSpacing: '2px', margin: '0 0 8px' }}>✓ REEL PUBLICADO NO INSTAGRAM</p>
-                {igPermalink && <a href={igPermalink} target="_blank" rel="noreferrer" style={{ color: '#707070', fontSize: '12px' }}>ver no instagram ↗</a>}
-              </div>
-            )}
-          </div>
-
           {/* ── TikTok (disabled) ── */}
           <div style={{ ...panel, opacity: 0.45 }}>
             <p style={{ color: '#ff0050', fontSize: '11px', letterSpacing: '1px', margin: '0 0 12px' }}>┌─ PUBLICAR NO TIKTOK</p>
@@ -1194,20 +1207,45 @@ export function Scheduler({ onNavigate, presetArtist, onPresetConsumed, marketCo
           <p style={{ color: '#00ff00', fontSize: '28px', margin: '0 0 16px', lineHeight: 1 }}>✓</p>
           <p style={{ color: '#c0c0c0', fontSize: '14px', fontWeight: 'bold', letterSpacing: '2px', margin: '0 0 20px' }}>BEAT PUBLICADO COM SUCESSO</p>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', alignItems: 'center', marginBottom: '24px' }}>
-            {publishedYt && (
+          {publishedYt && (
+            <div style={{ marginBottom: '12px' }}>
               <a href={publishedYt} target="_blank" rel="noreferrer"
                 style={{ color: '#00ff00', fontSize: '12px', letterSpacing: '1px', textDecoration: 'none', border: '1px solid #1a3a1a', padding: '6px 16px', backgroundColor: '#0a1a0a' }}>
                 ▶ YouTube — {publishedYt}
               </a>
-            )}
-            {publishedIg && (
-              <a href={publishedIg} target="_blank" rel="noreferrer"
-                style={{ color: '#e1306c', fontSize: '12px', letterSpacing: '1px', textDecoration: 'none', border: '1px solid #3a1a20', padding: '6px 16px', backgroundColor: '#1a0a10' }}>
-                ▶ Instagram — ver reel ↗
-              </a>
-            )}
-          </div>
+            </div>
+          )}
+
+          {/* Short status */}
+          {publishShort && (
+            <div style={{ marginBottom: '20px', padding: '10px', border: `1px solid ${shortStatus === 'done' ? '#1a2a44' : shortStatus === 'error' ? '#330000' : '#1a1a2a'}`, backgroundColor: '#080810' }}>
+              {shortStatus === 'cutting' && (
+                <p style={{ color: '#44aaff', fontSize: '11px', letterSpacing: '1px', margin: 0 }}>
+                  ✂ A CORTAR SHORT (59 seg)<span className="blink">_</span>
+                </p>
+              )}
+              {shortStatus === 'uploading' && (
+                <p style={{ color: '#44aaff', fontSize: '11px', letterSpacing: '1px', margin: 0 }}>
+                  ↑ A ENVIAR SHORT PARA YOUTUBE<span className="blink">_</span>
+                </p>
+              )}
+              {shortStatus === 'done' && shortVideoId && (
+                <div>
+                  <p style={{ color: '#44aaff', fontSize: '11px', letterSpacing: '1px', margin: '0 0 6px' }}>✓ SHORT PUBLICADO</p>
+                  <a href={`https://youtu.be/${shortVideoId}`} target="_blank" rel="noreferrer"
+                    style={{ color: '#44aaff', fontSize: '11px', textDecoration: 'none', letterSpacing: '1px' }}>
+                    ▶ Short — youtu.be/{shortVideoId}
+                  </a>
+                </div>
+              )}
+              {shortStatus === 'error' && (
+                <p style={{ color: '#ff4400', fontSize: '11px', letterSpacing: '1px', margin: 0 }}>⚠ Erro no Short — vídeo principal publicado com sucesso</p>
+              )}
+              {shortStatus === 'idle' && (
+                <p style={{ color: '#333', fontSize: '11px', letterSpacing: '1px', margin: 0 }}>SHORT — aguardando<span className="blink">_</span></p>
+              )}
+            </div>
+          )}
 
           <button onClick={reset}
             style={{ padding: '12px 32px', backgroundColor: '#00ff00', color: '#000000', border: 'none', cursor: 'pointer', fontFamily: 'Courier New, monospace', fontSize: '13px', fontWeight: 'bold', letterSpacing: '2px' }}>

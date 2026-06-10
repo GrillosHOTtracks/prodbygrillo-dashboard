@@ -1,12 +1,14 @@
 require('dotenv').config()
-const express = require('express')
-const multer  = require('multer')
-const fs      = require('fs')
-const path    = require('path')
-const https   = require('https')
-const http    = require('http')
-const { Readable } = require('stream')
+const express    = require('express')
+const multer     = require('multer')
+const fs         = require('fs')
+const path       = require('path')
+const https      = require('https')
+const http       = require('http')
+const { Readable }  = require('stream')
+const { execFile }  = require('child_process')
 const { google }        = require('googleapis')
+const Groq              = require('groq-sdk')
 const accountManager    = require('../accountManager')
 const { isQuotaError }  = require('../apiError')
 
@@ -32,6 +34,41 @@ const upload = multer({
 
 function readHistory()     { try { return JSON.parse(fs.readFileSync(DATA_FILE, 'utf-8')) } catch { return [] } }
 function writeHistory(arr) { fs.writeFileSync(DATA_FILE, JSON.stringify(arr, null, 2)) }
+
+// YouTube tag budget: each tag + 2 if multi-word (quotes) + 1 comma separator; total ≤ 500
+function sanitizeTags(raw) {
+  const arr = Array.isArray(raw) ? raw : String(raw || '').split(',')
+  const clean = arr
+    .map(t => String(t).replace(/[<>"#&/\\]/g, '').replace(/\s+/g, ' ').trim())
+    .filter(t => t.length > 0 && t.length <= 100)
+  const result = []
+  let total = 0
+  for (const tag of clean) {
+    const cost = tag.length + (tag.includes(' ') ? 2 : 0) + (result.length > 0 ? 1 : 0)
+    if (total + cost > 496) break
+    result.push(tag)
+    total += cost
+  }
+  console.log('[UPLOAD] tags sent:', result.length, 'tags |', total, 'chars |', JSON.stringify(result))
+  return result
+}
+
+// Cut a 59-second vertical Short (9:16 center-crop) starting at 15s
+// <60s + portrait is required for YouTube to classify as a Short
+function cutShort(inputPath, outputPath) {
+  return new Promise((resolve, reject) => {
+    execFile('ffmpeg', [
+      '-i', inputPath, '-ss', '15', '-t', '59',
+      // center-crop 16:9 → 9:16 portrait, then scale to 1080x1920 (standard Short res)
+      '-vf', 'crop=ih*9/16:ih,scale=1080:1920',
+      '-c:v', 'libx264', '-c:a', 'aac', '-preset', 'fast', '-crf', '23',
+      '-y', outputPath,
+    ], { timeout: 300000 }, (err) => {
+      if (err) reject(err)
+      else resolve()
+    })
+  })
+}
 
 // ─── Artist photo helpers — no API key required ──────────────────────────────
 
@@ -128,23 +165,27 @@ router.post('/video', upload.single('video'), async (req, res) => {
 
     send({ status: 'UPLOADING', progress: 0 })
 
+    // scheduledAt must be a valid future ISO string; if it's in the past, ignore it
+    const schedDate   = meta.scheduledAt ? new Date(meta.scheduledAt) : null
+    const isScheduled = schedDate && !isNaN(schedDate) && schedDate > new Date()
+
     const statusBody = {
-      privacyStatus:          meta.scheduledAt ? 'private' : 'public',
+      privacyStatus:           isScheduled ? 'private' : 'public',
       selfDeclaredMadeForKids: false,
     }
-    if (meta.scheduledAt) statusBody.publishAt = new Date(meta.scheduledAt).toISOString()
+    if (isScheduled) statusBody.publishAt = schedDate.toISOString()
+
+    const finalTags = sanitizeTags(meta.tags)
 
     const insertRes = await yt.videos.insert(
       {
         part:        ['snippet', 'status'],
         requestBody: {
           snippet: {
-            title:                meta.title        || 'Type Beat',
-            description:          meta.description  || '',
-            tags:                 meta.tags         || [],
-            categoryId:           '10',
-            defaultLanguage:      'pt',
-            defaultAudioLanguage: 'pt',
+            title:       meta.title || 'Type Beat',
+            description: meta.description || '',
+            tags:        finalTags,
+            categoryId:  '10',
           },
           status: statusBody,
         },
@@ -183,8 +224,8 @@ router.post('/video', upload.single('video'), async (req, res) => {
     history.unshift({
       id:           videoId,
       title:        meta.title || 'Type Beat',
-      publishedAt:  meta.scheduledAt || new Date().toISOString(),
-      status:       meta.scheduledAt ? 'scheduled' : 'live',
+      publishedAt:  isScheduled ? schedDate.toISOString() : new Date().toISOString(),
+      status:       isScheduled ? 'scheduled' : 'live',
       thumbnailUrl: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
       videoUrl:     `https://youtu.be/${videoId}`,
       views:        0,
@@ -192,13 +233,110 @@ router.post('/video', upload.single('video'), async (req, res) => {
     })
     writeHistory(history)
 
-    cleanup()
-    const finalStatus = meta.scheduledAt ? 'SCHEDULED' : 'LIVE'
+    const finalStatus = isScheduled ? 'SCHEDULED' : 'LIVE'
     send({ status: finalStatus, progress: 100, videoId, videoUrl: `https://youtu.be/${videoId}` })
+
+    // ── Engagement comment (AI-generated, specific to this video) ────────────
+    try {
+      const groq = new Groq({ apiKey: process.env.GROQ_API_KEY })
+      const videoTitle = meta.title || 'Type Beat'
+      const groqRes = await groq.chat.completions.create({
+        model: 'llama-3.3-70b-versatile',
+        max_tokens: 120,
+        messages: [{
+          role: 'user',
+          content: `You are prodbygrillo, a music producer. You just uploaded a YouTube beat video titled: "${videoTitle}"
+
+Write ONE short comment (1-2 lines) to post on your own video that:
+- Asks a question or calls for engagement specific to this beat's style/vibe
+- Invites rappers/singers to drop their name or tag someone who'd sound fire on it
+- Ends with the BeatStars link: https://www.beatstars.com/prodbygrillo
+- Feels natural, not promotional — like a producer hyping their own track
+- Use emojis sparingly (1-2 max)
+- 20-35 words total
+
+Reply with ONLY the comment text, nothing else.`,
+        }],
+      })
+      const commentText = groqRes.choices[0]?.message?.content?.trim()
+      if (commentText) {
+        await yt.commentThreads.insert({
+          part: ['snippet'],
+          requestBody: {
+            snippet: {
+              videoId,
+              topLevelComment: { snippet: { textOriginal: commentText } },
+            },
+          },
+        })
+        console.log('[UPLOAD] Engagement comment posted:', commentText.slice(0, 60))
+      }
+    } catch (engErr) {
+      console.warn('[UPLOAD] Engagement comment failed:', engErr.message)
+    }
+
+    // ── Short upload (optional) ────────────────────────────────────────────
+    console.log('[UPLOAD] publishShort:', meta.publishShort)
+    if (meta.publishShort) {
+      const shortPath = req.file.path + '_short.mp4'
+      try {
+        console.log('[UPLOAD] cutting short from:', req.file.path)
+        send({ status: 'SHORT_CUTTING' })
+        await cutShort(req.file.path, shortPath)
+        console.log('[UPLOAD] cutShort done, shortPath:', shortPath)
+
+        send({ status: 'SHORT_UPLOADING' })
+        const shortTitle = (meta.title || 'Type Beat').replace(/#shorts/gi, '').trim() + ' #shorts'
+        const shortDesc  = `${meta.title || 'Type Beat'}\n\n💰 https://www.beatstars.com/prodbygrillo\n\nprod. prodbygrillo\n\n#shorts`
+
+        // Short always goes live immediately — even when the main video is scheduled
+        const shortStatus_ = { privacyStatus: 'public', selfDeclaredMadeForKids: false }
+
+        const shortRes = await yt.videos.insert({
+          part: ['snippet', 'status'],
+          requestBody: {
+            snippet: {
+              title:       shortTitle,
+              description: shortDesc,
+              tags:        sanitizeTags(['shorts', 'type beat', 'free type beat', ...(meta.tags || []).slice(0, 4)]),
+              categoryId:  '10',
+            },
+            status: shortStatus_,
+          },
+          media: { mimeType: 'video/mp4', body: fs.createReadStream(shortPath) },
+        })
+
+        const shortVideoId = shortRes.data.id
+        console.log('[UPLOAD] SHORT_DONE shortVideoId:', shortVideoId)
+        // Save short to history
+        const hist2 = readHistory()
+        hist2.unshift({
+          id: shortVideoId, title: shortTitle,
+          publishedAt: new Date().toISOString(),
+          status: 'live',
+          thumbnailUrl: `https://i.ytimg.com/vi/${shortVideoId}/hqdefault.jpg`,
+          videoUrl: `https://youtu.be/${shortVideoId}`, views: 0,
+          uploadedAt: new Date().toISOString(),
+          isShort: true,
+        })
+        writeHistory(hist2)
+
+        send({ status: 'SHORT_DONE', shortVideoId, shortUrl: `https://youtu.be/${shortVideoId}` })
+      } catch (shortErr) {
+        console.error('[UPLOAD] Short error:', shortErr.message)
+        if (shortErr.response?.data) console.error('[UPLOAD] Short API error:', JSON.stringify(shortErr.response.data))
+        send({ status: 'SHORT_ERROR', error: shortErr.message })
+      } finally {
+        fs.unlink(shortPath, () => {})
+      }
+    }
+
+    cleanup()
     res.write('data: [DONE]\n\n')
     res.end()
   } catch (err) {
     console.error('[UPLOAD] video error:', err.message)
+    if (err.response?.data) console.error('[UPLOAD] API response:', JSON.stringify(err.response.data))
     cleanup()
     const isScopeErr = /insufficient authentication scopes/i.test(err.message)
     send({
@@ -215,7 +353,21 @@ router.post('/video', upload.single('video'), async (req, res) => {
 
 // ─── GET /api/upload/history ─────────────────────────────────────────────────
 router.get('/history', (_req, res) => {
-  res.json(readHistory())
+  const history = readHistory()
+  const now = new Date()
+
+  // Auto-promote scheduled entries whose publish date has passed
+  let changed = false
+  const updated = history.map(e => {
+    if (e.status === 'scheduled' && new Date(e.publishedAt) <= now) {
+      changed = true
+      return { ...e, status: 'live' }
+    }
+    return e
+  })
+
+  if (changed) writeHistory(updated)
+  res.json(updated)
 })
 
 // ─── POST /api/upload/history/refresh — atualiza views via YouTube API ───────
@@ -271,6 +423,154 @@ router.delete('/history/:id', (req, res) => {
   const history = readHistory().filter(e => e.id !== req.params.id)
   writeHistory(history)
   res.json({ ok: true })
+})
+
+// ─── POST /api/upload/create-short — download + cut + upload short ───────────
+const YTDLP = 'C:\\Users\\Prodbygrillo\\AppData\\Local\\Microsoft\\WinGet\\Packages\\yt-dlp.yt-dlp_Microsoft.Winget.Source_8wekyb3d8bbwe\\yt-dlp.exe'
+
+router.post('/create-short', async (req, res) => {
+  const { videoId, title } = req.body
+  if (!videoId) return res.status(400).json({ error: 'videoId required' })
+
+  res.setHeader('Content-Type',     'text/event-stream')
+  res.setHeader('Cache-Control',    'no-cache')
+  res.setHeader('Connection',       'keep-alive')
+  res.setHeader('X-Accel-Buffering','no')
+  res.flushHeaders()
+
+  const send    = (data) => { try { res.write(`data: ${JSON.stringify(data)}\n\n`) } catch {} }
+  const tmpVideo = path.join(TMP_DIR, `${videoId}_dl.mp4`)
+  const shortPath = path.join(TMP_DIR, `${videoId}_short.mp4`)
+  const cleanup = () => { fs.unlink(tmpVideo, () => {}); fs.unlink(shortPath, () => {}) }
+
+  try {
+    // 1. Download original video
+    send({ status: 'DOWNLOADING' })
+    console.log('[CREATE-SHORT] downloading:', videoId)
+    await new Promise((resolve, reject) => {
+      execFile(YTDLP, [
+        '-f', 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+        '--merge-output-format', 'mp4',
+        '-o', tmpVideo,
+        '--no-playlist',
+        `https://youtu.be/${videoId}`,
+      ], { timeout: 300000 }, (err) => {
+        if (err) { console.error('[CREATE-SHORT] download error:', err.message); reject(err) }
+        else { console.log('[CREATE-SHORT] download done'); resolve() }
+      })
+    })
+
+    // 2. Cut 59s vertical short
+    send({ status: 'CUTTING' })
+    await cutShort(tmpVideo, shortPath)
+    console.log('[CREATE-SHORT] cut done')
+
+    // 3. Upload to YouTube
+    send({ status: 'UPLOADING' })
+    const auth = accountManager.getAuthClient()
+    const yt   = google.youtube({ version: 'v3', auth })
+    const shortTitle = (title || 'Type Beat').replace(/#shorts/gi, '').trim() + ' #shorts'
+    const shortDesc  = `${title || 'Type Beat'}\n\n💰 https://www.beatstars.com/prodbygrillo\n\nprod. prodbygrillo\n\n#shorts`
+
+    const shortRes = await yt.videos.insert({
+      part: ['snippet', 'status'],
+      requestBody: {
+        snippet: {
+          title:       shortTitle,
+          description: shortDesc,
+          tags:        sanitizeTags(['shorts', 'type beat', 'free type beat']),
+          categoryId:  '10',
+        },
+        status: { privacyStatus: 'public', selfDeclaredMadeForKids: false },
+      },
+      media: { mimeType: 'video/mp4', body: fs.createReadStream(shortPath) },
+    })
+
+    const shortVideoId = shortRes.data.id
+    console.log('[CREATE-SHORT] done:', shortVideoId)
+    const hist = readHistory()
+    hist.unshift({
+      id: shortVideoId, title: shortTitle,
+      publishedAt: new Date().toISOString(), status: 'live',
+      thumbnailUrl: `https://i.ytimg.com/vi/${shortVideoId}/hqdefault.jpg`,
+      videoUrl: `https://youtu.be/${shortVideoId}`,
+      views: 0, uploadedAt: new Date().toISOString(), isShort: true,
+    })
+    writeHistory(hist)
+
+    send({ status: 'DONE', shortVideoId, shortUrl: `https://youtu.be/${shortVideoId}` })
+    res.write('data: [DONE]\n\n')
+    res.end()
+  } catch (err) {
+    console.error('[CREATE-SHORT] error:', err.message)
+    send({ status: 'ERROR', error: err.message })
+    res.write('data: [DONE]\n\n')
+    res.end()
+  } finally {
+    cleanup()
+  }
+})
+
+// ─── GET /api/upload/auto-shorts/status ──────────────────────────────────────
+router.get('/auto-shorts/status', (_req, res) => {
+  const autoShorts = require('../autoShorts')
+  res.json(autoShorts.getStatus())
+})
+
+// ─── POST /api/upload/auto-shorts/run-now ────────────────────────────────────
+router.post('/auto-shorts/run-now', (_req, res) => {
+  const autoShorts = require('../autoShorts')
+  autoShorts.runNow()
+  res.json({ ok: true, message: 'Processando próximo vídeo...' })
+})
+
+// ─── POST /api/upload/test-engagement-comment ────────────────────────────────
+// Test the AI engagement comment on an existing video without uploading
+router.post('/test-engagement-comment', async (req, res) => {
+  const { videoId, title } = req.body
+  if (!videoId || !title) return res.status(400).json({ error: 'videoId e title obrigatórios' })
+
+  try {
+    const groq = new Groq({ apiKey: process.env.GROQ_API_KEY })
+    const groqRes = await groq.chat.completions.create({
+      model: 'llama-3.3-70b-versatile',
+      max_tokens: 120,
+      messages: [{
+        role: 'user',
+        content: `You are prodbygrillo, a music producer. You just uploaded a YouTube beat video titled: "${title}"
+
+Write ONE short comment (1-2 lines) to post on your own video that:
+- Asks a question or calls for engagement specific to this beat's style/vibe
+- Invites rappers/singers to drop their name or tag someone who'd sound fire on it
+- Ends with the BeatStars link: https://www.beatstars.com/prodbygrillo
+- Feels natural, not promotional — like a producer hyping their own track
+- Use emojis sparingly (1-2 max)
+- 20-35 words total
+
+Reply with ONLY the comment text, nothing else.`,
+      }],
+    })
+    const commentText = groqRes.choices[0]?.message?.content?.trim()
+    if (!commentText) return res.status(500).json({ error: 'Groq não gerou comentário' })
+
+    const auth = accountManager.getAuthClient()
+    const yt   = google.youtube({ version: 'v3', auth })
+    await yt.commentThreads.insert({
+      part: ['snippet'],
+      requestBody: {
+        snippet: {
+          videoId,
+          topLevelComment: { snippet: { textOriginal: commentText } },
+        },
+      },
+    })
+
+    console.log('[TEST-ENG-COMMENT] Posted on', videoId, ':', commentText.slice(0, 60))
+    res.json({ ok: true, videoId, comment: commentText })
+  } catch (err) {
+    console.error('[TEST-ENG-COMMENT] Error:', err.message)
+    res.status(500).json({ error: err.message })
+  }
 })
 
 module.exports = router
