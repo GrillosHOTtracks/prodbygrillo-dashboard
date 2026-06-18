@@ -32,12 +32,19 @@ function fillDates(rows, startDate, endDate) {
 
 const _cache = { analytics: {}, traffic: {}, revenue: null }
 
+const CACHE_TTL = 30 * 60 * 1000  // 30 min — serve cache while fresh, force refresh after
+
 // GET /api/analytics?range=28d
 router.get('/', async (req, res) => {
   const range = req.query.range || '28d'
+  // Serve in-memory cache if fresh (avoids unnecessary quota spend)
+  const cached = _cache.analytics[range]
+  if (!req.query.bust && cached && Date.now() - new Date(cached._cachedAt).getTime() < CACHE_TTL) {
+    return res.json({ ...cached, _cached: true })
+  }
   try {
     const days   = rangeToDs(range)
-    const result = await accountManager.withYouTube(async (auth) => {
+    const result = await accountManager.withPrimaryYouTube(async (auth) => {
       const ya        = google.youtubeAnalytics({ version: 'v2', auth })
       const startDate = daysAgo(days)
       const endDate   = daysAgo(0)
@@ -87,9 +94,13 @@ router.get('/', async (req, res) => {
 // GET /api/analytics/traffic
 router.get('/traffic', async (req, res) => {
   const range = req.query.range || '28d'
+  const cachedT = _cache.traffic[range]
+  if (!req.query.bust && cachedT && Date.now() - new Date(cachedT._cachedAt).getTime() < CACHE_TTL) {
+    return res.json({ ...cachedT, _cached: true })
+  }
   try {
     const days   = rangeToDs(range)
-    const rows = await accountManager.withYouTube(async (auth) => {
+    const rows = await accountManager.withPrimaryYouTube(async (auth) => {
       const ya = google.youtubeAnalytics({ version: 'v2', auth })
       const { data } = await ya.reports.query({
         ids: 'channel==MINE',
@@ -146,8 +157,11 @@ router.get('/traffic', async (req, res) => {
 
 // GET /api/analytics/revenue-monthly
 router.get('/revenue-monthly', async (req, res) => {
+  if (!req.query.bust && _cache.revenue && Date.now() - new Date(_cache.revenue._cachedAt).getTime() < CACHE_TTL) {
+    return res.json({ ..._cache.revenue, _cached: true })
+  }
   try {
-    const rows = await accountManager.withYouTube(async (auth) => {
+    const rows = await accountManager.withPrimaryYouTube(async (auth) => {
       const ya  = google.youtubeAnalytics({ version: 'v2', auth })
       const now = new Date()
       // dimensions=month requires both dates to be the 1st of a month

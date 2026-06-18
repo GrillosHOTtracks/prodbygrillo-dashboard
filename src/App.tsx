@@ -12,6 +12,7 @@ import { Agenda }    from './pages/Agenda'
 import { Plan } from './pages/Plan'
 import { Market } from './pages/Market'
 import { api } from './lib/api'
+import { ToastProvider } from './components/ui/Toast'
 import type { Page, DateRange } from './types'
 import type { DailyRow, ChannelInfo, Video as ApiVideo, AudienceResponse, ArtistTrend, TrafficSource, MonthlyRevenue } from './lib/api'
 
@@ -27,8 +28,8 @@ function LoginOverlay({ onSuccess }: { onSuccess: () => void }) {
     setLoading(true)
     setError('')
     try {
-      const { token } = await api.dashboard.login(username, password)
-      localStorage.setItem('dashboard_token', token)
+      // FIX (correction 8): server sets httpOnly cookie — no token in response body
+      await api.dashboard.login(username, password)
       onSuccess()
     } catch (err: unknown) {
       setError((err as Error).message || 'Erro de autenticação')
@@ -243,16 +244,12 @@ export default function App() {
   const [revenueMonthly, setRevenueMonthly]     = useState<MonthlyRevenue[] | null>(null)
   const [revenueIncluded, setRevenueIncluded]   = useState<boolean | null>(null)
 
-  // Verify dashboard token on load
+  // FIX (correction 8): verify session via httpOnly cookie — no localStorage check needed.
+  // The server will 401 if the cookie is absent/expired, 200 if valid.
   useEffect(() => {
-    const token = localStorage.getItem('dashboard_token')
-    if (!token) { setDashboardChecked(true); return }
     api.dashboard.verify()
       .then(() => { setDashboardAuthed(true) })
-      .catch(() => {
-        localStorage.removeItem('dashboard_token')
-        setDashboardAuthed(false)
-      })
+      .catch(() => { setDashboardAuthed(false) })
       .finally(() => setDashboardChecked(true))
   }, [])
 
@@ -329,6 +326,23 @@ export default function App() {
     })
   }, [authenticated, dateRange])
 
+  // Auto-refresh all live data every 30 min (matches server-side cache TTL)
+  useEffect(() => {
+    if (!authenticated) return
+    const INTERVAL = 30 * 60 * 1000
+    const id = setInterval(() => {
+      api.channel().then(setChannelInfo).catch(() => {})
+      api.videos().then(r => setVideos(r.data)).catch(() => {})
+      api.analytics(dateRange)
+        .then(r => { setAnalyticsData(r.data); setRevenueIncluded(r.revenueIncluded) })
+        .catch(() => {})
+      api.traffic(dateRange).then(r => setTrafficSources(r.data)).catch(() => {})
+      api.audience(dateRange).then(setAudienceData).catch(() => {})
+      api.revenueMonthly().then(r => setRevenueMonthly(r.data)).catch(() => {})
+    }, INTERVAL)
+    return () => clearInterval(id)
+  }, [authenticated, dateRange])
+
   const metricsData = analyticsData ?? []
 
   if (!dashboardChecked) return <LoadingBar label="> A VERIFICAR ACESSO..." />
@@ -372,13 +386,15 @@ export default function App() {
           setAuthenticated(false)
           setAnalyticsData(null)
           setChannelInfo(null)
-          api.dashboard.logout()
+          // FIX (correction 8): calls server to clear httpOnly cookie
+          await api.dashboard.logout().catch(() => {})
           setDashboardAuthed(false)
         }} />
     }
   }
 
   return (
+    <ToastProvider>
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden', backgroundColor: 'var(--bg)' }}>
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
         <Sidebar
@@ -408,5 +424,6 @@ export default function App() {
         </div>
       </div>
     </div>
+    </ToastProvider>
   )
 }

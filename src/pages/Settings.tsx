@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import type { CSSProperties } from 'react'
 import { api } from '../lib/api'
-import type { AccountsStatus } from '../lib/api'
+import type { AccountsStatus, TikTokStatus } from '../lib/api'
 
 const panel: CSSProperties = {
   backgroundColor: '#0d0d0d',
@@ -46,16 +46,25 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 }
 
 export function Settings({ onLogout }: { authenticated?: boolean; onLogout?: () => void }) {
-  const [status, setStatus]     = useState<AccountsStatus | null>(null)
+  const [status, setStatus]         = useState<AccountsStatus | null>(null)
   const [connecting, setConnecting] = useState(false)
+  const [tiktok, setTiktok]         = useState<TikTokStatus | null>(null)
+  const [ttConnecting, setTtConn]   = useState(false)
 
   function loadStatus() {
     api.accounts.status().then(setStatus).catch(() => {})
+    api.tiktok.status().then(setTiktok).catch(() => {})
   }
 
   useEffect(() => {
     loadStatus()
-    const iv = setInterval(loadStatus, 3000)
+    const iv = setInterval(loadStatus, 4000)
+    // Handle redirect back from TikTok OAuth
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('tiktok') === 'ok') {
+      window.history.replaceState({}, '', window.location.pathname)
+      api.tiktok.status().then(setTiktok).catch(() => {})
+    }
     return () => clearInterval(iv)
   }, [])
 
@@ -75,6 +84,24 @@ export function Settings({ onLogout }: { authenticated?: boolean; onLogout?: () 
     if (onLogout) onLogout()
   }
 
+
+
+  async function handleTikTokConnect() {
+    setTtConn(true)
+    try {
+      const { url } = await api.tiktok.auth()
+      window.open(url, '_blank', 'width=500,height=700')
+    } finally {
+      setTtConn(false)
+    }
+  }
+
+  async function handleTikTokDisconnect() {
+    await api.tiktok.logout()
+    setTiktok(null)
+    loadStatus()
+  }
+
   const oauth = status?.oauth
   const keys  = status?.keys ?? []
 
@@ -89,44 +116,158 @@ export function Settings({ onLogout }: { authenticated?: boolean; onLogout?: () 
             Baixe em Google Cloud Console → APIs &amp; Services → Credentials.
           </p>
         ) : (
+          <>
           <div style={{
             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
             padding: '10px', border: '1px solid #222222', backgroundColor: '#111111',
           }}>
             <div>
-              <p style={{ color: '#c0c0c0', fontSize: '12px', margin: 0, letterSpacing: '0.5px' }}>
-                OAuth 2.0 · YouTube Data + Analytics + Upload
-              </p>
+              {oauth.authenticated && oauth.channelName ? (
+                <>
+                  <p style={{ color: '#00ff00', fontSize: '12px', margin: 0, letterSpacing: '0.5px' }}>
+                    ✓ {oauth.channelName}
+                  </p>
+                  <p style={{ color: '#555555', fontSize: '10px', margin: '2px 0 0' }}>
+                    {oauth.channelHandle || ''}{oauth.accountEmail ? ` · ${oauth.accountEmail}` : ''}
+                  </p>
+                </>
+              ) : (
+                <p style={{ color: '#c0c0c0', fontSize: '12px', margin: 0, letterSpacing: '0.5px' }}>
+                  OAuth 2.0 · YouTube Data + Analytics + Upload
+                </p>
+              )}
               <p style={{
-                color: oauth.quotaExceeded ? '#ff6600' : oauth.authenticated ? '#00ff00' : '#555555',
+                color: oauth.quotaExceeded ? '#ff6600' : oauth.authenticated ? '#336633' : '#555555',
                 fontSize: '10px', margin: '4px 0 0', letterSpacing: '0.5px',
               }}>
                 {oauth.quotaExceeded
                   ? '⚠ QUOTA EXCEDIDA — reset 05:00 BRT / 08:00 UTC'
                   : oauth.authenticated
-                  ? '✓ CONECTADO'
+                  ? 'conectado · YouTube Data + Analytics + Upload'
                   : '✗ NÃO CONECTADO'}
               </p>
             </div>
+            <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }}>
+              {oauth.authenticated && (
+                <button
+                  onClick={handleConnect}
+                  disabled={connecting}
+                  style={{
+                    backgroundColor: '#0d0d0d',
+                    color: connecting ? '#555555' : '#ffaa00',
+                    border: '1px solid #3a2a00',
+                    padding: '4px 10px', fontSize: '10px', cursor: connecting ? 'wait' : 'pointer',
+                    fontFamily: 'Courier New, monospace', letterSpacing: '1px',
+                  }}
+                  title="Trocar conta Google"
+                >
+                  {connecting ? '[...]' : '[TROCAR CONTA]'}
+                </button>
+              )}
+              <button
+                onClick={oauth.authenticated ? handleDisconnect : handleConnect}
+                disabled={connecting}
+                style={{
+                  backgroundColor: '#0d0d0d',
+                  color:  oauth.authenticated ? '#ff4400' : connecting ? '#555555' : '#00ff00',
+                  border: `1px solid ${oauth.authenticated ? '#3a1a1a' : '#1a3a1a'}`,
+                  padding: '4px 12px', fontSize: '11px', cursor: connecting ? 'wait' : 'pointer',
+                  fontFamily: 'Courier New, monospace', letterSpacing: '1px',
+                }}
+              >
+                {oauth.authenticated
+                  ? '[DISCONNECT]'
+                  : connecting ? '[ABRINDO...]' : '[CONNECT YOUTUBE]'}
+              </button>
+            </div>
+          </div>
+
+          {/* Wrong channel warning */}
+          {oauth.authenticated && oauth.channelHandle && !oauth.channelHandle.toLowerCase().includes('prodbygrillo') && (
+            <div style={{
+              marginTop: '8px', padding: '8px 10px',
+              border: '1px solid #553300', backgroundColor: '#1a0a00',
+            }}>
+              <p style={{ color: '#ff6600', fontSize: '10px', margin: '0 0 4px', letterSpacing: '1px' }}>
+                ⚠ CONTA ERRADA DETECTADA
+              </p>
+              <p style={{ color: '#884422', fontSize: '10px', margin: '0 0 6px', lineHeight: 1.6 }}>
+                Canal conectado: <strong style={{ color: '#cc6633' }}>{oauth.channelHandle}</strong> — não é o canal prodbygrillo.
+              </p>
+              <p style={{ color: '#664422', fontSize: '10px', margin: 0, lineHeight: 1.7 }}>
+                1. Clica [DISCONNECT]<br />
+                2. Vai ao <strong>youtube.com</strong> e muda para o canal <strong>@prodbygrillo</strong><br />
+                3. Volta aqui e clica [CONNECT YOUTUBE]<br />
+                4. Na janela do Google, escolhe o email associado ao canal prodbygrillo
+              </p>
+            </div>
+          )}
+          </>
+        )}
+        <p style={{ color: '#333333', fontSize: '10px', marginTop: '8px', lineHeight: '1.6' }}>
+          Acesso completo: analytics, dados do canal, upload de vídeos. Requer OAuth com sua conta Google.
+        </p>
+      </Section>
+
+      {/* ── TIKTOK ──────────────────────────────────────────────────────── */}
+      <Section title="TIKTOK">
+        {!tiktok?.configured ? (
+          <p style={{ color: '#555555', fontSize: '11px', lineHeight: '1.8' }}>
+            Adicione <span style={{ color: '#707070' }}>TIKTOK_CLIENT_SECRET</span> no arquivo <span style={{ color: '#707070' }}>.env</span> para ativar.
+          </p>
+        ) : (
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '10px', border: '1px solid #222222', backgroundColor: '#111111',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              {tiktok?.user?.avatar_url && (
+                <img
+                  src={tiktok.user.avatar_url}
+                  alt=""
+                  style={{ width: 32, height: 32, borderRadius: '50%', border: '1px solid #333333', objectFit: 'cover' }}
+                />
+              )}
+              <div>
+                <p style={{ color: '#c0c0c0', fontSize: '12px', margin: 0, letterSpacing: '0.5px' }}>
+                  {tiktok?.user?.display_name
+                    ? `@${tiktok.user.display_name}${tiktok.user.is_verified ? ' ✓' : ''}`
+                    : 'OAuth 2.0 · TikTok Content API'}
+                </p>
+                {tiktok?.user ? (
+                  <p style={{ color: '#555555', fontSize: '10px', margin: '3px 0 0' }}>
+                    {tiktok.user.follower_count.toLocaleString()} seguidores ·{' '}
+                    {tiktok.user.video_count} vídeos
+                  </p>
+                ) : (
+                  <p style={{
+                    color: tiktok?.authenticated ? '#00ff00' : '#555555',
+                    fontSize: '10px', margin: '4px 0 0', letterSpacing: '0.5px',
+                  }}>
+                    {tiktok?.authenticated ? '✓ CONECTADO' : '✗ NÃO CONECTADO'}
+                  </p>
+                )}
+              </div>
+            </div>
             <button
-              onClick={oauth.authenticated ? handleDisconnect : handleConnect}
-              disabled={connecting}
+              onClick={tiktok?.authenticated ? handleTikTokDisconnect : handleTikTokConnect}
+              disabled={ttConnecting}
               style={{
                 backgroundColor: '#0d0d0d',
-                color:  oauth.authenticated ? '#ff4400' : connecting ? '#555555' : '#00ff00',
-                border: `1px solid ${oauth.authenticated ? '#3a1a1a' : '#1a3a1a'}`,
-                padding: '4px 12px', fontSize: '11px', cursor: connecting ? 'wait' : 'pointer',
+                color:  tiktok?.authenticated ? '#ff4400' : ttConnecting ? '#555555' : '#ff0050',
+                border: `1px solid ${tiktok?.authenticated ? '#3a1a1a' : '#3a001a'}`,
+                padding: '4px 12px', fontSize: '11px', cursor: ttConnecting ? 'wait' : 'pointer',
                 fontFamily: 'Courier New, monospace', letterSpacing: '1px',
               }}
             >
-              {oauth.authenticated
+              {tiktok?.authenticated
                 ? '[DISCONNECT]'
-                : connecting ? '[ABRINDO...]' : '[CONNECT YOUTUBE]'}
+                : ttConnecting ? '[ABRINDO...]' : '[CONNECT TIKTOK]'}
             </button>
           </div>
         )}
         <p style={{ color: '#333333', fontSize: '10px', marginTop: '8px', lineHeight: '1.6' }}>
-          Acesso completo: analytics, dados do canal, upload de vídeos. Requer OAuth com sua conta Google.
+          Uploads vão para o inbox do TikTok como rascunho. Publica diretamente no app após aprovação do TikTok Developer Portal.
         </p>
       </Section>
 

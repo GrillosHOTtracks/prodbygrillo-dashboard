@@ -1,12 +1,18 @@
 const BASE = '/api'
 
+// FIX (correction 8): all requests use credentials:'include' so the httpOnly
+// cookie is sent automatically. No JWT stored in localStorage.
+// The authHeaders helper is kept as an empty object so existing call-sites compile
+// unchanged — the cookie handles authentication now.
 function authHeaders(): HeadersInit {
-  const token = localStorage.getItem('dashboard_token')
-  return token ? { Authorization: `Bearer ${token}` } : {}
+  return {}
 }
 
 async function get<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, { headers: authHeaders() })
+  const res = await fetch(`${BASE}${path}`, {
+    headers:     authHeaders(),
+    credentials: 'include',
+  })
   if (!res.ok) {
     const body = await res.json().catch(() => ({}))
     throw Object.assign(new Error(body.error || res.statusText), { status: res.status, code: body.code })
@@ -16,9 +22,10 @@ async function get<T>(path: string): Promise<T> {
 
 async function post<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...authHeaders() },
-    body: JSON.stringify(body),
+    method:      'POST',
+    headers:     { 'Content-Type': 'application/json', ...authHeaders() },
+    credentials: 'include',
+    body:        JSON.stringify(body),
   })
   if (!res.ok) {
     const b = await res.json().catch(() => ({}))
@@ -82,11 +89,14 @@ export type ArtistTrend = {
 }
 
 export type OAuthStatus = {
-  type:          'oauth'
-  label:         string
-  authenticated: boolean
-  quotaExceeded: boolean
-  hasCredFile:   boolean
+  type:           'oauth'
+  label:          string
+  authenticated:  boolean
+  quotaExceeded:  boolean
+  hasCredFile:    boolean
+  channelName:    string | null
+  channelHandle:  string | null
+  accountEmail:   string | null
 }
 export type ApiKeyStatus = {
   n:             number
@@ -108,22 +118,57 @@ export type AudienceResponse = {
   subscriberRatio: { subscribed: number; unsubscribed: number } | null
 } & Cacheable
 
+export type GenreTrend = {
+  id:               string
+  label:            string
+  beatCount:        number
+  avgViews:         number
+  totalViews:       number
+  topArtists:       string[]
+  saturation:       'low' | 'medium' | 'high'
+  opportunityScore: number
+  hotTag:           string | null
+  beatIdea:         BeatIdea
+}
+
+export type TikTokUser = {
+  display_name:   string
+  avatar_url:     string
+  follower_count: number
+  following_count: number
+  likes_count:    number
+  video_count:    number
+  is_verified:    boolean
+}
+export type TikTokStatus = {
+  authenticated: boolean
+  hasToken:      boolean
+  openId:        string | null
+  expiresAt:     number | null
+  scope:         string | null
+  configured:    boolean
+  user?:         TikTokUser | null
+}
+
 export const api = {
   dashboard: {
+    // FIX (correction 8): login no longer returns a token — authentication is via
+    // httpOnly cookie set by the server. No localStorage involved.
     login:  (username: string, password: string) =>
-      post<{ token: string }>('/auth/dashboard-login', { username, password }),
+      post<{ ok: boolean }>('/auth/dashboard-login', { username, password }),
     verify: () => get<{ ok: boolean }>('/auth/dashboard-verify'),
-    logout: () => { localStorage.removeItem('dashboard_token') },
+    // FIX (correction 8): logout calls server endpoint to clear the httpOnly cookie
+    logout: () => post<{ ok: boolean }>('/auth/dashboard-logout', {}),
   },
   auth: {
     status:  ()         => get<AuthStatus>('/auth/status'),
     url:     ()         => get<{ url: string }>(`/auth/url?origin=${encodeURIComponent(window.location.origin)}`),
-    logout:  async ()   => { await fetch(`${BASE}/auth/logout`, { method: 'POST', headers: authHeaders() }) },
+    logout:  async ()   => { await fetch(`${BASE}/auth/logout`, { method: 'POST', credentials: 'include' }) },
   },
   accounts: {
-    status:     ()  => get<AccountsStatus>('/accounts/status'),
-    connect:    ()  => get<{ url: string }>(`/auth/url?origin=${encodeURIComponent(window.location.origin)}`),
-    disconnect: async () => { await fetch(`${BASE}/auth/logout`, { method: 'POST' }) },
+    status:     () => get<AccountsStatus>('/accounts/status'),
+    connect:    () => get<{ url: string }>(`/auth/url?origin=${encodeURIComponent(window.location.origin)}`),
+    disconnect: () => post<{ ok: boolean }>('/auth/logout', {}),
   },
   channel:        (bust = false) => get<ChannelInfo>(`/channel${bust ? '?bust=1' : ''}`),
   analytics:      (range: string) => get<AnalyticsResponse>(`/analytics?range=${range}`),
@@ -132,4 +177,10 @@ export const api = {
   videos:         ()             => get<VideosResponse>('/videos'),
   audience:       (range: string) => get<AudienceResponse>(`/audience?range=${range}`),
   trending:       ()             => get<ArtistTrend[]>('/trending'),
+  market:         (bust = false) => get<GenreTrend[]>(`/market${bust ? '?bust=1' : ''}`),
+  tiktok: {
+    status: () => get<TikTokStatus>('/tiktok/status'),
+    auth:   () => get<{ url: string }>('/tiktok/auth'),
+    logout: () => post<{ ok: boolean }>('/tiktok/logout', {}),
+  },
 }

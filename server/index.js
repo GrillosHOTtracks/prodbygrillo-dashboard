@@ -1,13 +1,15 @@
-const express = require('express')
-const cors    = require('cors')
-const path    = require('path')
-const fs      = require('fs')
+const express    = require('express')
+const cors       = require('cors')
+const path       = require('path')
+const fs         = require('fs')
+const cookieParser = require('cookie-parser')
 
 console.log('[SERVER] Node:', process.version, '| PORT env:', process.env.PORT)
 
 let authRoutes, accountsRoutes, channelRoutes, analyticsRoutes,
     videosRoutes, audienceRoutes, trendingRoutes, marketRoutes, aiRoutes, uploadRoutes, scheduleRoutes,
-    accountManager, dashboardAuth, autoShorts, autoComments, autoReplies, autoPlaylists, autoSEO
+    tiktokRoutes, videoGenRoutes,
+    accountManager, dashboardAuth, autoShorts, autoComments, autoReplies, autoPlaylists, autoSEO, autoTikTok, autoTikTokReplies
 
 try {
   authRoutes      = require('./routes/auth')
@@ -21,6 +23,8 @@ try {
   aiRoutes        = require('./routes/ai')
   uploadRoutes    = require('./routes/upload')
   scheduleRoutes  = require('./routes/schedule')
+  tiktokRoutes    = require('./routes/tiktok')
+  videoGenRoutes  = require('./routes/videoGen')
   accountManager   = require('./accountManager');
   ({ dashboardAuth } = require('./middleware/dashboardAuth'))
   autoShorts      = require('./autoShorts')
@@ -28,6 +32,8 @@ try {
   autoReplies     = require('./autoReplies')
   autoPlaylists   = require('./autoPlaylists')
   autoSEO         = require('./autoSEO')
+  autoTikTok        = require('./autoTikTok')
+  autoTikTokReplies = require('./autoTikTokReplies')
   console.log('[SERVER] All modules loaded OK')
 } catch (err) {
   console.error('[SERVER] Module load error:', err.message)
@@ -38,11 +44,13 @@ try {
 const app  = express()
 const PORT = process.env.PORT || 3010
 
+// FIX (correction 10): Railway domain regex was missing ^ anchor — could match any
+// URL containing the domain string as a substring (e.g. attacker-site.com/railway-domain.up.railway.app)
 const ALLOWED_ORIGINS = [
   /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/,
   process.env.FRONTEND_URL,
   process.env.RAILWAY_PUBLIC_DOMAIN
-    ? new RegExp(process.env.RAILWAY_PUBLIC_DOMAIN.replace(/\./g, '\\.'))
+    ? new RegExp('^https://' + process.env.RAILWAY_PUBLIC_DOMAIN.replace(/\./g, '\\.') + '$')
     : null,
 ].filter(Boolean)
 
@@ -56,6 +64,7 @@ app.use(cors({
   },
   credentials: true,
 }))
+app.use(cookieParser())
 app.use(express.json())
 app.use(dashboardAuth)
 
@@ -77,6 +86,8 @@ app.use('/api/market',    requireAuth, marketRoutes)
 app.use('/api/ai',        aiRoutes)
 app.use('/api/upload',    requireAuth, uploadRoutes)
 app.use('/api/schedule',  scheduleRoutes)
+app.use('/api/tiktok',     tiktokRoutes)
+app.use('/api/video-gen', requireAuth, videoGenRoutes)
 app.get('/api/plan/comments-status', requireAuth, (_req, res) => res.json(autoComments.getStatus()))
 app.post('/api/plan/run-comments',   requireAuth, (_req, res) => { autoComments.runNow(); res.json({ ok: true }) })
 app.get('/api/plan/replies-status',    requireAuth, (_req, res) => res.json(autoReplies.getStatus()))
@@ -146,6 +157,8 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   autoReplies.start(accountManager)
   autoPlaylists.start(accountManager)
   autoSEO.start(accountManager, PORT)
+  autoTikTok.start()
+  autoTikTokReplies.start()
 })
 
 server.on('error', (err) => {

@@ -3,26 +3,27 @@ import type { Page } from '../types'
 import { ChevronRight } from 'lucide-react'
 import {
   IconMonitor, IconCamera, IconBarChart,
-  IconAudience, IconCoin, IconGear, IconAI, IconStore, IconMarket, IconPlan,
+  IconAudience, IconCoin, IconGear, IconAI, IconPlan, IconMarket, IconCalendar,
 } from './PixelIcons'
 
 type NavItem = {
   id: Page
   label: string
   Icon: ({ size }: { size?: number }) => React.ReactElement
+  color: string
 }
 
 const navItems: NavItem[] = [
-  { id: 'overview',   label: 'OVERVIEW',   Icon: IconMonitor  },
-  { id: 'videos',     label: 'VIDEOS',     Icon: IconCamera   },
-  { id: 'analytics',  label: 'ANALYTICS',  Icon: IconBarChart },
-  { id: 'audience',   label: 'AUDIENCE',   Icon: IconAudience },
-  { id: 'revenue',    label: 'REVENUE',    Icon: IconCoin     },
-  { id: 'market',     label: 'MERCADO',    Icon: IconMarket   },
-  { id: 'plan',       label: 'PLANO',      Icon: IconPlan     },
-  { id: 'scheduler',  label: 'SCHEDULER',  Icon: IconAI       },
-  { id: 'beatstore',  label: 'BEAT STORE', Icon: IconStore    },
-  { id: 'settings',   label: 'SETTINGS',   Icon: IconGear     },
+  { id: 'overview',   label: 'OVERVIEW',   Icon: IconMonitor,  color: '#00ff00' },
+  { id: 'videos',     label: 'VIDEOS',     Icon: IconCamera,   color: '#ff6644' },
+  { id: 'analytics',  label: 'ANALYTICS',  Icon: IconBarChart, color: '#00ccff' },
+  { id: 'audience',   label: 'AUDIENCE',   Icon: IconAudience, color: '#cc88ff' },
+  { id: 'revenue',    label: 'REVENUE',    Icon: IconCoin,     color: '#ffaa00' },
+  { id: 'plan',       label: 'PLANO',      Icon: IconPlan,     color: '#88ccff' },
+  { id: 'market',     label: 'MARKET',     Icon: IconMarket,   color: '#ff9944' },
+  { id: 'scheduler',  label: 'SCHEDULER',  Icon: IconAI,       color: '#00ff00' },
+  { id: 'agenda',     label: 'AGENDA',     Icon: IconCalendar, color: '#44aaff' },
+  { id: 'settings',   label: 'SETTINGS',   Icon: IconGear,     color: '#aaaaaa' },
 ]
 
 interface SidebarProps {
@@ -87,7 +88,7 @@ export function Sidebar({ currentPage, onNavigate, collapsed, onToggle }: Sideba
 
       {/* Nav */}
       <nav style={{ flex: 1, paddingTop: '6px', overflowY: 'auto', overflowX: 'hidden' }}>
-        {navItems.map(({ id, label, Icon }) => {
+        {navItems.map(({ id, label, Icon, color }) => {
           const active = currentPage === id
           return (
             <NavButton
@@ -98,6 +99,7 @@ export function Sidebar({ currentPage, onNavigate, collapsed, onToggle }: Sideba
               active={active}
               collapsed={collapsed}
               onClick={() => onNavigate(id)}
+              color={color}
             />
           )
         })}
@@ -163,11 +165,14 @@ export function Sidebar({ currentPage, onNavigate, collapsed, onToggle }: Sideba
   )
 }
 
-function NavButton({ label, Icon, active, collapsed, onClick }: {
+function NavButton({ label, Icon, active, collapsed, onClick, color }: {
   id?: Page; label: string
   Icon: ({ size }: { size?: number }) => React.ReactElement
-  active: boolean; collapsed: boolean; onClick: () => void
+  active: boolean; collapsed: boolean; onClick: () => void; color: string
 }) {
+  const hex12 = color + '1e'   // ~12% opacity for background
+  const hex40 = color + '66'   // ~40% opacity for inactive icon
+
   return (
     <button
       onClick={onClick}
@@ -179,15 +184,16 @@ function NavButton({ label, Icon, active, collapsed, onClick }: {
         gap: '10px',
         padding: collapsed ? '10px 0' : '9px 12px',
         justifyContent: collapsed ? 'center' : 'flex-start',
-        background: active ? 'var(--accent-muted)' : 'transparent',
-        color: active ? 'var(--accent)' : 'var(--text-dim)',
+        background: active ? hex12 : 'transparent',
+        color: active ? 'var(--text-bright)' : 'var(--text-dim)',
         border: 'none',
         cursor: 'pointer',
         textAlign: 'left',
         fontSize: '11px',
+        fontWeight: active ? '600' : '400',
         letterSpacing: '0.8px',
-        borderLeft: active ? '2px solid var(--accent)' : '2px solid transparent',
-        boxShadow: active ? 'inset 0 0 12px rgba(0,255,0,0.04)' : 'none',
+        borderLeft: active ? `2px solid ${color}` : '2px solid transparent',
+        boxShadow: active ? `inset 0 0 16px ${hex12}` : 'none',
         transition: `background var(--t-fast), color var(--t-fast), box-shadow var(--t-fast)`,
         position: 'relative',
         overflow: 'hidden',
@@ -212,9 +218,9 @@ function NavButton({ label, Icon, active, collapsed, onClick }: {
         flexShrink: 0,
         display: 'flex',
         alignItems: 'center',
-        opacity: active ? 1 : 0.5,
-        filter: active ? `drop-shadow(0 0 4px rgba(0,255,0,0.6))` : 'none',
-        transition: `opacity var(--t-fast), filter var(--t-fast)`,
+        color: active ? color : hex40,
+        filter: active ? `drop-shadow(0 0 5px ${color}90)` : 'none',
+        transition: `color var(--t-fast), filter var(--t-fast)`,
       }}>
         <Icon size={18} />
       </span>

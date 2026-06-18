@@ -9,5 +9,8 @@ export default defineConfig({
     proxy: {
       '/api': { target: 'http://localhost:3010', changeOrigin: true },
     },
+    watch: {
+      ignored: ['**/server/**', '**/server/data/**'],
+    },
   },
 })

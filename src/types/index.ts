@@ -1,16 +1,6 @@
-export type Page = 'overview' | 'videos' | 'analytics' | 'audience' | 'revenue' | 'plan' | 'scheduler' | 'beatstore' | 'settings' | 'market'
+export type Page = 'overview' | 'videos' | 'analytics' | 'audience' | 'revenue' | 'plan' | 'scheduler' | 'agenda' | 'market' | 'settings'
 
 export type DateRange = '7d' | '28d' | '90d' | '365d'
-
-export interface MarketContext {
-  artist:    string
-  niche:     string
-  keywords:  string[]
-  hotMarket: string
-  bpm?:      number | string
-  key?:      string
-  title?:    string
-}
 
 export interface StatCard {
   label: string

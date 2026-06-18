@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useToast } from '../components/ui/Toast'
 
 interface UploadEntry {
   id: string
@@ -42,6 +43,7 @@ const btnRetro: React.CSSProperties = {
 }
 
 export function Agenda() {
+  const toast = useToast()
   const today = new Date()
   const [year,      setYear]      = useState(today.getFullYear())
   const [month,     setMonth]     = useState(today.getMonth())
@@ -66,6 +68,24 @@ export function Agenda() {
   }
   useEffect(() => { loadAll() }, [])
 
+  async function deletePlan(id: string) {
+    const entry = schedule.find(e => e.id === id)
+    await fetch(`/api/schedule/${id}`, { method: 'DELETE' })
+    setSchedule(s => s.filter(e => e.id !== id))
+    toast(`Plano "${entry?.beatName ?? id}" removido`)
+  }
+
+  async function markPosted(id: string) {
+    const entry = schedule.find(e => e.id === id)
+    await fetch(`/api/schedule/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'posted' }),
+    })
+    setSchedule(s => s.map(e => e.id === id ? { ...e, status: 'posted' } : e))
+    toast(`"${entry?.beatName ?? 'Beat'}" marcado como concluído!`)
+  }
+
   async function generateSchedule() {
     setGenLoading(true)
     try {
@@ -74,23 +94,9 @@ export function Agenda() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ weeks: genWeeks, anchorArtist: 'Hurricane Wisdom' }),
       })
-      if (r.ok) await loadAll()
+      if (r.ok) { await loadAll(); toast(`Cronograma de ${genWeeks}W gerado com sucesso!`) }
     } catch {}
     finally { setGenLoading(false) }
-  }
-
-  async function deletePlan(id: string) {
-    await fetch(`/api/schedule/${id}`, { method: 'DELETE' })
-    setSchedule(s => s.filter(e => e.id !== id))
-  }
-
-  async function markPosted(id: string) {
-    await fetch(`/api/schedule/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: 'posted' }),
-    })
-    setSchedule(s => s.map(e => e.id === id ? { ...e, status: 'posted' } : e))
   }
 
   // Build maps: date → uploads, date → plan entries
@@ -190,10 +196,11 @@ export function Agenda() {
             const key      = `${year}-${String(month + 1).padStart(2,'0')}-${String(day).padStart(2,'0')}`
             const uploads  = uploadsByDate.get(key) || []
             const plans    = planByDate.get(key) || []
-            const hasLive  = uploads.some(e => e.status === 'live')
-            const hasSched = uploads.some(e => e.status === 'scheduled')
-            const hasPlan  = plans.some(e => e.status === 'planned')
-            const isToday  = key === todayKey
+            const hasLive   = uploads.some(e => e.status === 'live')
+            const hasSched  = uploads.some(e => e.status === 'scheduled')
+            const hasPlan   = plans.some(e => e.status === 'planned')
+            const hasPosted = plans.some(e => e.status === 'posted')
+            const isToday   = key === todayKey
             const isSel    = key === selectedKey
             const clickable = uploads.length > 0 || plans.length > 0
 
@@ -217,13 +224,14 @@ export function Agenda() {
                   {String(day).padStart(2, '0')}
                 </span>
                 <div style={{ display: 'flex', gap: '3px', flexWrap: 'wrap', justifyContent: 'center' }}>
-                  {hasLive  && <span style={{ width: 7, height: 7, borderRadius: '50%', backgroundColor: '#00ff00', boxShadow: '0 0 5px #00ff00', display: 'inline-block' }} />}
-                  {hasSched && <span style={{ width: 7, height: 7, borderRadius: '50%', backgroundColor: '#ffaa00', boxShadow: '0 0 5px #ffaa00', display: 'inline-block' }} />}
-                  {hasPlan  && <span style={{ width: 7, height: 7, borderRadius: '50%', backgroundColor: '#cc88ff', boxShadow: '0 0 5px #cc88ff', display: 'inline-block' }} />}
+                  {hasLive   && <span style={{ width: 7, height: 7, borderRadius: '50%', backgroundColor: '#00ff00', boxShadow: '0 0 5px #00ff00', display: 'inline-block' }} />}
+                  {hasSched  && <span style={{ width: 7, height: 7, borderRadius: '50%', backgroundColor: '#ffaa00', boxShadow: '0 0 5px #ffaa00', display: 'inline-block' }} />}
+                  {hasPlan   && <span style={{ width: 7, height: 7, borderRadius: '50%', backgroundColor: '#cc88ff', boxShadow: '0 0 5px #cc88ff', display: 'inline-block' }} />}
+                  {hasPosted && <span style={{ width: 7, height: 7, borderRadius: '50%', backgroundColor: '#3a7a4a', boxShadow: '0 0 4px #3a7a4a', display: 'inline-block', border: '1px solid #5aaa6a' }} />}
                 </div>
-                {hasPlan && plans[0]?.beatName && (
-                  <span style={{ color: '#7a5a99', fontSize: '8px', textAlign: 'center', lineHeight: 1.2, maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', padding: '0 2px' }}>
-                    {plans[0].beatName}
+                {(hasPlan || hasPosted) && plans[0]?.beatName && (
+                  <span style={{ color: hasPosted && !hasPlan ? '#3a7a4a' : '#7a5a99', fontSize: '8px', textAlign: 'center', lineHeight: 1.2, maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', padding: '0 2px' }}>
+                    {hasPosted && !hasPlan ? '✓ ' : ''}{plans[0].beatName}
                   </span>
                 )}
               </div>
@@ -237,6 +245,7 @@ export function Agenda() {
             { color: '#00ff00', label: 'PUBLICADO' },
             { color: '#ffaa00', label: 'AGENDADO' },
             { color: '#cc88ff', label: 'PLANEADO' },
+            { color: '#3a7a4a', label: 'CONCLUÍDO' },
           ].map(({ color, label }) => (
             <div key={label} style={{ display: 'flex', alignItems: 'center', gap: '7px' }}>
               <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: color, boxShadow: `0 0 4px ${color}`, display: 'inline-block' }} />
@@ -365,6 +374,10 @@ export function Agenda() {
                     {e.filenameTemplate}.mp4
                   </p>
                 </div>
+                <button onClick={() => markPosted(e.id)}
+                  style={{ background: 'transparent', border: '1px solid #1a3a1a', color: '#2a6a3a', cursor: 'pointer', fontSize: '11px', flexShrink: 0, padding: '1px 6px', fontFamily: 'Courier New, monospace' }}
+                  onMouseEnter={ev => { (ev.currentTarget as HTMLElement).style.color = '#00cc44'; (ev.currentTarget as HTMLElement).style.borderColor = '#00cc44' }}
+                  onMouseLeave={ev => { (ev.currentTarget as HTMLElement).style.color = '#2a6a3a'; (ev.currentTarget as HTMLElement).style.borderColor = '#1a3a1a' }}>✓</button>
                 <button onClick={() => deletePlan(e.id)}
                   style={{ background: 'transparent', border: 'none', color: '#333', cursor: 'pointer', fontSize: '12px', flexShrink: 0, paddingTop: 2 }}
                   onMouseEnter={ev => { (ev.currentTarget as HTMLElement).style.color = '#ff4400' }}

@@ -11,13 +11,21 @@ function daysAgo(n) {
   return d.toISOString().split('T')[0]
 }
 
-let _cache = null
+const CACHE_TTL = 30 * 60 * 1000
 
-// GET /api/audience
+// FIX: cache keyed by range (was a single object, caused all ranges to return the same data)
+const _cache = {}
+
+// GET /api/audience?range=28d
 router.get('/', async (req, res) => {
+  const range = req.query.range || '28d'
+  const cached = _cache[range]
+  if (!req.query.bust && cached && Date.now() - new Date(cached._cachedAt).getTime() < CACHE_TTL) {
+    return res.json({ ...cached, _cached: true })
+  }
   try {
-    const days   = { '7d': 7, '28d': 28, '90d': 90, '365d': 365 }[req.query.range || '28d'] || 28
-    const result = await accountManager.withYouTube(async (auth) => {
+    const days   = { '7d': 7, '28d': 28, '90d': 90, '365d': 365 }[range] || 28
+    const result = await accountManager.withPrimaryYouTube(async (auth) => {
       const ya        = google.youtubeAnalytics({ version: 'v2', auth })
       const startDate = daysAgo(days)
       const endDate   = daysAgo(0)
@@ -29,7 +37,7 @@ router.get('/', async (req, res) => {
         ya.reports.query({ ids: 'channel==MINE', startDate, endDate, metrics: 'views', dimensions: 'subscribedStatus' }),
       ])
 
-      // Rethrow quota errors so withYouTube can rotate to the next account
+      // Rethrow quota errors so the cache fallback below kicks in
       const quotaHit = settled.find(r => r.status === 'rejected' && isQuotaError(r.reason))
       if (quotaHit) throw quotaHit.reason
 
@@ -73,18 +81,23 @@ router.get('/', async (req, res) => {
         const rows       = countryRes.value.data.rows || []
         const totalViews = rows.reduce((s, r) => s + r[1], 0)
         for (const row of rows) {
-          countries.push({ code: row[0], name: COUNTRY_NAMES[row[0]] || row[0], views: row[1], percentage: parseFloat(((row[1] / totalViews) * 100).toFixed(1)) })
+          countries.push({
+            code:       row[0],
+            name:       COUNTRY_NAMES[row[0]] || row[0],
+            views:      row[1],
+            percentage: parseFloat(((row[1] / totalViews) * 100).toFixed(1)),
+          })
         }
       }
 
       // Devices
       const deviceLabels = {
-        MOBILE:       'Mobile',
-        MOBILE_PHONE: 'Mobile',
-        TABLET:       'Tablet',
-        DESKTOP:      'Desktop',
-        TV:           'Smart TV',
-        GAME_CONSOLE: 'Console',
+        MOBILE:           'Mobile',
+        MOBILE_PHONE:     'Mobile',
+        TABLET:           'Tablet',
+        DESKTOP:          'Desktop',
+        TV:               'Smart TV',
+        GAME_CONSOLE:     'Console',
         UNKNOWN_PLATFORM: 'Other',
       }
       const devices = []
@@ -113,10 +126,11 @@ router.get('/', async (req, res) => {
 
       return { audienceAge, countries, devices, subscriberRatio }
     })
-    _cache = { ...result, _cachedAt: new Date().toISOString() }
+    _cache[range] = { ...result, _cachedAt: new Date().toISOString() }
     res.json(result)
   } catch (err) {
-    if (isQuotaError(err) && _cache) return res.json({ ..._cache, _cached: true })
+    const c = _cache[range]
+    if (isQuotaError(err) && c) return res.json({ ...c, _cached: true })
     sendError(res, err, 'audience route')
   }
 })

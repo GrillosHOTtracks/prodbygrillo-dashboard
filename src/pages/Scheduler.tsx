@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { ThumbnailBuilder } from '../components/scheduler/ThumbnailBuilder'
 import { analyzeAudio } from '../lib/audioAnalysis'
+import { useToast } from '../components/ui/Toast'
 
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -116,6 +117,7 @@ function StepIndicator({ step }: { step: 1 | 2 | 3 | 4 }) {
 
 // ─── Upload history ───────────────────────────────────────────────────────────
 function UploadHistory({ refreshKey }: { refreshKey: number }) {
+  const toast = useToast()
   const [history, setHistory]         = useState<UploadEntry[]>([])
   const [loading, setLoading]         = useState(false)
   const [refreshing, setRefreshing]   = useState(false)
@@ -167,6 +169,7 @@ function UploadHistory({ refreshKey }: { refreshKey: number }) {
             if (evt.status === 'UPLOADING')   setShortMsg(m => ({ ...m, [e.id]: 'A enviar para YouTube...' }))
             if (evt.status === 'DONE') {
               setShortMsg(m => ({ ...m, [e.id]: `✓ Short publicado` }))
+              toast('Short publicado no YouTube!')
               load()
             }
             if (evt.status === 'ERROR') setShortMsg(m => ({ ...m, [e.id]: `⚠ ${evt.error}` }))
@@ -308,6 +311,7 @@ function UploadHistory({ refreshKey }: { refreshKey: number }) {
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 export function Scheduler() {
+  const toast = useToast()
   const [step, setStep] = useState<1|2|3|4>(1)
 
   // ── Etapa 1: files
@@ -340,9 +344,14 @@ export function Scheduler() {
   const [uploadProgress, setUploadProgress] = useState(0)
   const [uploadVideoId, setUploadVideoId]   = useState<string | null>(null)
   const [uploadError, setUploadError]       = useState('')
-  const [publishShort, setPublishShort]     = useState(true)
-  const [shortStatus, setShortStatus]       = useState<'idle'|'cutting'|'uploading'|'done'|'error'>('idle')
-  const [shortVideoId, setShortVideoId]     = useState<string | null>(null)
+  const [publishShort, setPublishShort]         = useState(true)
+  const [shortStatus, setShortStatus]           = useState<'idle'|'cutting'|'uploading'|'done'|'error'>('idle')
+  const [shortVideoId, setShortVideoId]         = useState<string | null>(null)
+  const [publishTikTok, setPublishTikTok]       = useState(false)
+  const [includeTtLink, setIncludeTtLink]       = useState(true)
+  const [tiktokAutoStatus, setTiktokAutoStatus] = useState<'idle'|'uploading'|'done'|'error'>('idle')
+  const [tiktokAutoProgress, setTiktokAutoProgress] = useState(0)
+  const [tiktokAutoError, setTiktokAutoError]   = useState('')
 
   // ── Audio detection
   const [audioStatus, setAudioStatus] = useState<'idle' | 'detecting' | 'done' | 'error'>('idle')
@@ -350,18 +359,48 @@ export function Scheduler() {
   const [detectedKey, setDetectedKey] = useState<string | null>(null)
   const [mainArtist, setMainArtist]   = useState<string | null>(null)
 
+  // ── Video generation from audio
+  const [vidGenAnchor, setVidGenAnchor]         = useState('')
+  const [vidGenSecondary, setVidGenSecondary]   = useState('')
+  const [vidGenFilename, setVidGenFilename]     = useState('')
+  const [vidGenGenre, setVidGenGenre]           = useState('')
+  const [vidGenAudio, setVidGenAudio]           = useState<File | null>(null)
+  const vidGenAudioRef                          = useRef<HTMLInputElement>(null)
+  const [vidGenStatus, setVidGenStatus]         = useState<'idle'|'running'|'done'|'error'>('idle')
+  const [vidGenProgress, setVidGenProgress]     = useState(0)
+  const [vidGenMsg, setVidGenMsg]               = useState('')
+  const [vidGenToken, setVidGenToken]           = useState<string | null>(null)
+
+  const GENRES = ['melodic trap', 'dark trap', 'drill', 'pluggnb', 'RnB']
+
   // ── History
   const [histRefreshKey, setHistRefreshKey] = useState(0)
 
   // ── Agenda integration
-  const [plannedBeats, setPlannedBeats]         = useState<{ id: string; date: string; anchorArtist: string; beatName: string; secondaryArtist: string; filenameTemplate: string }[]>([])
+  const [plannedBeats, setPlannedBeats]         = useState<{ id: string; date: string; anchorArtist: string; beatName: string; secondaryArtist: string; genre: string; filenameTemplate: string }[]>([])
   const [selectedPlanId, setSelectedPlanId]     = useState<string | null>(null)
   const [plannedSecondary, setPlannedSecondary] = useState<string | null>(null)
+
+  // Auto-fill video gen fields + schedule date when a plan is selected
+  useEffect(() => {
+    if (selectedPlanId) {
+      const plan = plannedBeats.find(p => p.id === selectedPlanId)
+      if (plan) {
+        setVidGenAnchor(plan.anchorArtist || '')
+        setVidGenSecondary(plan.secondaryArtist || '')
+        setVidGenFilename(plan.filenameTemplate || '')
+        setVidGenGenre(plan.genre || '')
+        if (plan.date) {
+          setScheduledAt(`${plan.date}T20:08`)
+        }
+      }
+    }
+  }, [selectedPlanId, plannedBeats])
 
   useEffect(() => {
     fetch('/api/schedule')
       .then(r => r.ok ? r.json() : [])
-      .then((data: { id: string; date: string; anchorArtist: string; beatName: string; secondaryArtist: string; filenameTemplate: string; status: string }[]) =>
+      .then((data: { id: string; date: string; anchorArtist: string; beatName: string; secondaryArtist: string; genre: string; filenameTemplate: string; status: string }[]) =>
         setPlannedBeats(data.filter(e => e.status === 'planned').sort((a, b) => a.date.localeCompare(b.date)))
       )
       .catch(() => {})
@@ -373,6 +412,30 @@ export function Scheduler() {
   // ── Thumbnail AI prompt
   const [thumbPrompt, setThumbPrompt]               = useState('')
   const [thumbPromptLoading, setThumbPromptLoading] = useState(false)
+
+  // ── TikTok upload
+  const [ttConnected, setTtConnected]     = useState(false)
+  const [ttUser, setTtUser]               = useState<string | null>(null)
+  const [ttVideoFile, setTtVideoFile]     = useState<File | null>(null)
+  const [ttPhase, setTtPhase]             = useState<'idle'|'uploading'|'done'|'error'>('idle')
+  const [ttProgress, setTtProgress]       = useState(0)
+  const [ttError, setTtError]             = useState('')
+  const [ttMode, setTtMode]               = useState<'immediate'|'scheduled'|'draft'>('immediate')
+  const [ttScheduledAt, setTtScheduledAt] = useState('')       // datetime-local string
+  const [ttDescription, setTtDescription] = useState('')
+  const ttVideoInputRef                   = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    fetch('/api/tiktok/status')
+      .then(r => r.ok ? r.json() : null)
+      .then((d: any) => {
+        if (d) {
+          setTtConnected(d.authenticated ?? false)
+          setTtUser(d.user?.display_name ?? null)
+        }
+      })
+      .catch(() => {})
+  }, [])
 
   // Parse filename to extract clean beat name, BPM, and key.
   // Handles patterns like: "YT [FREE] Hurricane Wisdom Type Beat 2026 - My Truth 176bpm F MAJOR.mp4"
@@ -433,6 +496,83 @@ export function Scheduler() {
     if (!beatName) beatName = NOISE(raw) || raw
 
     return { beatName, mainArtist, bpm, key }
+  }
+
+  // Generate video from audio + artist footage
+  async function generateVideo(anchor: string, secondary: string, audio: File, filename?: string, genre?: string) {
+    setVidGenStatus('running')
+    setVidGenProgress(0)
+    setVidGenMsg('')
+    setVidGenToken(null)
+    const fd = new FormData()
+    fd.append('audio', audio)
+    fd.append('anchorArtist', anchor)
+    fd.append('secondaryArtist', secondary)
+    if (genre) fd.append('genre', genre)
+    if (filename) fd.append('filename', filename)
+    try {
+      const res = await fetch('/api/video-gen/generate', { method: 'POST', body: fd })
+      if (!res.ok || !res.body) throw new Error(`Erro HTTP ${res.status}`)
+      const reader = res.body.getReader()
+      const dec = new TextDecoder()
+      let buf = ''
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buf += dec.decode(value, { stream: true })
+        const lines = buf.split('\n'); buf = lines.pop() ?? ''
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue
+          try {
+            const d = JSON.parse(line.slice(6))
+            if (d.msg) setVidGenMsg(d.msg)
+            if (d.progress !== undefined) setVidGenProgress(d.progress)
+            if (d.step === 'done') { setVidGenToken(d.token); setVidGenStatus('done') }
+            if (d.step === 'error') setVidGenStatus('error')
+          } catch {}
+        }
+      }
+    } catch (e: any) {
+      setVidGenMsg(e.message)
+      setVidGenStatus('error')
+    }
+  }
+
+  // Use the generated video as the upload file — only sets videoFile,
+  // intentionally does NOT call onVideoSelect so beatName/analysis/artists are preserved
+  async function useGeneratedVideo(token: string) {
+    try {
+      const res = await fetch(`/api/video-gen/download/${token}`)
+      if (!res.ok) throw new Error(`Vídeo não encontrado ou expirado (${res.status})`)
+      const blob = await res.blob()
+      const safeName = vidGenFilename ? `${vidGenFilename}.mp4` : `type_beat_video_${Date.now()}.mp4`
+      const file = new File([blob], safeName, { type: 'video/mp4' })
+      setVideoFile(file)
+
+      // Analyze the original audio file for BPM/key — it's still in vidGenAudio at this point
+      if (vidGenAudio) {
+        setAudioStatus('detecting')
+        try {
+          const result = await analyzeAudio(vidGenAudio)
+          setDetectedBpm(result.bpm)
+          setDetectedKey(result.key)
+          setAudioStatus('done')  // triggers useEffect → analyze() with correct BPM/key
+        } catch {
+          setAudioStatus('error')
+        }
+      } else if (aiStatus === 'idle' && beatName.trim()) {
+        analyze(beatName.trim(), detectedBpm, detectedKey, mainArtist, plannedSecondary)
+      }
+
+      setVidGenStatus('idle')
+      setVidGenAudio(null)
+      setVidGenMsg('')
+      setVidGenProgress(0)
+      setVidGenToken(null)
+    } catch (e: any) {
+      setVidGenStatus('error')
+      setVidGenMsg(`Erro: ${(e as any).message}`)
+    }
   }
 
   // Handle video selection — extract beat name + start audio detection
@@ -524,6 +664,7 @@ export function Scheduler() {
               setEditHashtags(parsed.hashtags.join(' '))
               setAiStatus('done')
               setStep(3)
+              toast(`Análise LAIS concluída — SEO Score ${parsed.seoScore}/100`)
             } catch { throw new Error('Resposta da IA inválida — tenta novamente.') }
             break outer
           }
@@ -555,13 +696,17 @@ export function Scheduler() {
     try {
       const formData = new FormData()
       formData.append('video', videoFile)
+      const ttLinkLine = includeTtLink && ttConnected && ttUser
+        ? `\n\n🎵 TikTok: https://www.tiktok.com/@${ttUser}`
+        : ''
       formData.append('meta', JSON.stringify({
         title:            editTitle,
-        description:      editDesc + (hashtags.length ? '\n\n' + hashtags.join(' ') : ''),
+        description:      editDesc + ttLinkLine + (hashtags.length ? '\n\n' + hashtags.join(' ') : ''),
         tags,
         thumbnailDataUrl: thumbDataUrl,
         scheduledAt:      scheduledAt ? new Date(scheduledAt).toISOString() : undefined,
         publishShort,
+        publishTikTok: publishTikTok && ttConnected,
       }))
 
       const res = await fetch('/api/upload/video', { method: 'POST', body: formData })
@@ -595,6 +740,7 @@ export function Scheduler() {
               setPublishedYt(`https://youtu.be/${evt.videoId}`)
               setHistRefreshKey(k => k + 1)
               setStep(4)
+              toast(evt.status === 'SCHEDULED' ? 'Beat agendado no YouTube!' : 'Beat publicado no YouTube!')
               // Mark planned beat as posted
               if (selectedPlanId) {
                 fetch(`/api/schedule/${selectedPlanId}`, {
@@ -612,14 +758,27 @@ export function Scheduler() {
               setShortStatus('done')
               setShortVideoId(evt.shortVideoId)
               setHistRefreshKey(k => k + 1)
+              toast('Short publicado no YouTube!')
             }
             if (evt.status === 'SHORT_ERROR') setShortStatus('error')
+            if (evt.status === 'TIKTOK_UPLOADING') {
+              setTiktokAutoStatus('uploading')
+              setTiktokAutoProgress(evt.progress ?? 0)
+            }
+            if (evt.status === 'TIKTOK_DONE') {
+              setTiktokAutoStatus('done')
+              toast('Vídeo enviado para o inbox do TikTok!')
+            }
+            if (evt.status === 'TIKTOK_ERROR') {
+              setTiktokAutoStatus('error')
+              setTiktokAutoError(evt.error || 'Erro TikTok')
+            }
             if (evt.status === 'ERROR') throw new Error(evt.error || 'Upload failed')
           } catch (e) { if (!(e instanceof SyntaxError)) throw e }
         }
       }
     } catch (err: any) { setUploadError(err.message); setUploadPhase('error') }
-  }, [videoFile, analysis, editTitle, editDesc, editTags, editHashtags, thumbDataUrl, scheduledAt, uploadPhase, publishShort, selectedPlanId])
+  }, [videoFile, analysis, editTitle, editDesc, editTags, editHashtags, thumbDataUrl, scheduledAt, uploadPhase, publishShort, publishTikTok, ttConnected, selectedPlanId])
 
   // ── Thumbnail AI prompt generator
   const generateThumbPrompt = useCallback(async () => {
@@ -654,7 +813,10 @@ export function Scheduler() {
         }
       }
     } catch (err: any) { setThumbPrompt(`Erro: ${err.message}`) }
-    finally { setThumbPromptLoading(false) }
+    finally {
+      setThumbPromptLoading(false)
+      toast('Prompt Midjourney gerado — pronto para copiar')
+    }
   }, [analysis, beatName, detectedBpm, detectedKey])
 
   // ── Full reset
@@ -667,6 +829,9 @@ export function Scheduler() {
     setShortStatus('idle'); setShortVideoId(null); setSelectedPlanId(null); setPlannedSecondary(null)
     setPublishedYt(null)
     setThumbPrompt(''); setThumbPromptLoading(false)
+    setTiktokAutoStatus('idle'); setTiktokAutoProgress(0); setTiktokAutoError('')
+    setTtPhase('idle'); setTtProgress(0); setTtError(''); setTtVideoFile(null)
+    setIncludeTtLink(true)
   }
 
   const showResults = aiStatus === 'done' && analysis !== null
@@ -759,6 +924,66 @@ export function Scheduler() {
                 </>
               )}
             </div>
+
+            {/* ── GERAR VÍDEO A PARTIR DE ÁUDIO (Opção A) ── */}
+            {!videoFile && (
+              <div style={{ marginTop: '12px', borderTop: '1px solid #1a1a1a', paddingTop: '12px' }}>
+                <p style={{ color: '#333', fontSize: '9px', letterSpacing: '2px', margin: '0 0 10px', textAlign: 'center' }}>── OU GERAR VÍDEO A PARTIR DE ÁUDIO ──</p>
+                <input ref={vidGenAudioRef} type="file" accept="audio/mp3,audio/wav,audio/mpeg,audio/*" style={{ display: 'none' }}
+                  onChange={e => { const f = e.target.files?.[0]; if (f) setVidGenAudio(f) }} />
+                <div onClick={() => vidGenAudioRef.current?.click()} style={{
+                  border: `2px dashed ${vidGenAudio ? '#00aaff' : '#1a1a2a'}`, padding: '10px',
+                  cursor: 'pointer', backgroundColor: '#080810', textAlign: 'center', marginBottom: '10px',
+                }}>
+                  {vidGenAudio
+                    ? <p style={{ color: '#00aaff', fontSize: '11px', margin: 0 }}>♪ {vidGenAudio.name.slice(0, 45)}</p>
+                    : <p style={{ color: '#222', fontSize: '11px', margin: 0, letterSpacing: '1px' }}>CLIQUE PARA SELECIONAR MP3 / WAV</p>}
+                </div>
+                <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
+                  <input value={vidGenAnchor} readOnly placeholder="Seleciona um beat da agenda →"
+                    style={{ flex: 1, backgroundColor: '#050508', border: '1px solid #1a1a2a', color: '#8888cc', fontSize: '11px', padding: '5px 8px', fontFamily: 'Courier New, monospace', cursor: 'default' }} />
+                  <input value={vidGenSecondary} readOnly placeholder="Artista secundário"
+                    style={{ flex: 1, backgroundColor: '#050508', border: '1px solid #1a1a2a', color: '#8888cc', fontSize: '11px', padding: '5px 8px', fontFamily: 'Courier New, monospace', cursor: 'default' }} />
+                </div>
+                <div style={{ display: 'flex', gap: '5px', marginBottom: '8px', flexWrap: 'wrap' }}>
+                  {GENRES.map(g => (
+                    <button key={g} onClick={() => setVidGenGenre(g)}
+                      style={{ padding: '3px 8px', fontSize: '10px', fontFamily: 'Courier New, monospace', letterSpacing: '1px', cursor: 'pointer', backgroundColor: vidGenGenre === g ? '#1a1a4a' : '#080810', border: `1px solid ${vidGenGenre === g ? '#6666cc' : '#1a1a2a'}`, color: vidGenGenre === g ? '#aaaaff' : '#444466' }}>
+                      {g.toUpperCase()}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  disabled={!vidGenAudio || !selectedPlanId || !vidGenAnchor || !vidGenSecondary || vidGenStatus === 'running'}
+                  onClick={() => vidGenAudio && generateVideo(vidGenAnchor, vidGenSecondary, vidGenAudio, vidGenFilename || undefined, vidGenGenre || undefined)}
+                  style={{ width: '100%', padding: '8px', backgroundColor: '#080810', border: `1px solid ${vidGenStatus === 'running' ? '#4444aa' : '#2a2a6a'}`, color: vidGenStatus === 'running' ? '#4444aa' : '#6666cc', fontSize: '11px', letterSpacing: '1px', cursor: 'pointer', fontFamily: 'Courier New, monospace' }}>
+                  {vidGenStatus === 'running' ? '● A GERAR VÍDEO...' : '[ GERAR VÍDEO ]'}
+                </button>
+                {(vidGenStatus === 'running' || (vidGenStatus === 'error' && vidGenMsg)) && (
+                  <div style={{ marginTop: '8px', backgroundColor: '#040408', border: '1px solid #1a1a2a', padding: '8px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px' }}>
+                      <span style={{ color: vidGenStatus === 'error' ? '#ff4444' : '#4444aa', fontSize: '10px', fontFamily: 'Courier New, monospace' }}>» {vidGenMsg || '...'}</span>
+                      {vidGenStatus === 'running' && <span style={{ color: '#6666cc', fontSize: '10px', fontFamily: 'Courier New, monospace' }}>{vidGenProgress}%</span>}
+                    </div>
+                    {vidGenStatus === 'running' && (
+                      <div style={{ height: '5px', backgroundColor: '#0a0a14', border: '1px solid #1a1a2a' }}>
+                        <div style={{ height: '100%', width: `${vidGenProgress}%`, backgroundColor: '#4444aa', transition: 'width 0.4s ease' }} />
+                      </div>
+                    )}
+                  </div>
+                )}
+                {vidGenStatus === 'done' && vidGenToken && (
+                  <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
+                    <a href={`/api/video-gen/download/${vidGenToken}`} download style={{ flex: 1, padding: '7px', backgroundColor: '#040408', border: '1px solid #2a2a6a', color: '#6666cc', fontSize: '11px', letterSpacing: '1px', textAlign: 'center', textDecoration: 'none', fontFamily: 'Courier New, monospace' }}>
+                      ↓ DESCARREGAR
+                    </a>
+                    <button onClick={() => useGeneratedVideo(vidGenToken)} style={{ flex: 1, padding: '7px', backgroundColor: '#040808', border: '1px solid #1a3a1a', color: '#00cc44', fontSize: '11px', letterSpacing: '1px', cursor: 'pointer', fontFamily: 'Courier New, monospace' }}>
+                      ✓ USAR PARA UPLOAD
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Beat name */}
             {videoFile && (
@@ -1107,7 +1332,7 @@ export function Scheduler() {
                 {/* Short toggle */}
                 <div
                   onClick={() => setPublishShort(v => !v)}
-                  style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '14px', cursor: 'pointer', userSelect: 'none' }}
+                  style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px', cursor: 'pointer', userSelect: 'none' }}
                 >
                   <div style={{
                     width: 14, height: 14, border: `1px solid ${publishShort ? '#44aaff' : '#333'}`,
@@ -1120,6 +1345,50 @@ export function Scheduler() {
                     PUBLICAR TAMBÉM COMO SHORT (60 seg automático)
                   </span>
                 </div>
+
+                {/* TikTok auto-upload toggle — only visible if TikTok connected */}
+                {ttConnected && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '14px' }}>
+                    <div
+                      onClick={() => setPublishTikTok(v => !v)}
+                      style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', userSelect: 'none', opacity: publishShort ? 1 : 0.35 }}
+                      title={publishShort ? '' : 'Requer SHORT ativado'}
+                    >
+                      <div style={{
+                        width: 14, height: 14, border: `1px solid ${publishTikTok && publishShort ? '#ff2d55' : '#333'}`,
+                        backgroundColor: publishTikTok && publishShort ? '#ff2d55' : 'transparent',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                      }}>
+                        {publishTikTok && publishShort && <span style={{ color: '#fff', fontSize: '10px', fontWeight: 'bold', lineHeight: 1 }}>✓</span>}
+                      </div>
+                      <span style={{ color: publishTikTok && publishShort ? '#ff2d55' : '#555', fontSize: '11px', letterSpacing: '1px' }}>
+                        AUTO TIKTOK INBOX (mesmo vídeo 9:16)
+                      </span>
+                    </div>
+
+                    {/* TikTok link in YouTube description */}
+                    <div
+                      onClick={() => setIncludeTtLink(v => !v)}
+                      style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', userSelect: 'none', paddingLeft: 2 }}
+                    >
+                      <div style={{
+                        width: 14, height: 14, border: `1px solid ${includeTtLink ? '#ff2d55' : '#333'}`,
+                        backgroundColor: includeTtLink ? '#ff2d55' : 'transparent',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                      }}>
+                        {includeTtLink && <span style={{ color: '#fff', fontSize: '10px', fontWeight: 'bold', lineHeight: 1 }}>✓</span>}
+                      </div>
+                      <span style={{ color: includeTtLink ? '#ff2d55' : '#555', fontSize: '11px', letterSpacing: '1px' }}>
+                        INCLUIR LINK TIKTOK NA DESCRIÇÃO
+                      </span>
+                      {includeTtLink && ttUser && (
+                        <span style={{ color: '#441118', fontSize: '9px', letterSpacing: '0.5px' }}>
+                          → tiktok.com/@{ttUser}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
 
                 <button onClick={handleUpload} disabled={!videoFile || uploadPhase !== 'idle'}
                   style={{
@@ -1181,17 +1450,215 @@ export function Scheduler() {
             )}
           </div>
 
-          {/* ── TikTok (disabled) ── */}
-          <div style={{ ...panel, opacity: 0.45 }}>
-            <p style={{ color: '#ff0050', fontSize: '11px', letterSpacing: '1px', margin: '0 0 12px' }}>┌─ PUBLICAR NO TIKTOK</p>
-            <div style={{ textAlign: 'center', padding: '12px 0' }}>
-              <button disabled style={{ padding: '10px 28px', backgroundColor: '#0d0005', color: '#441122', border: '1px solid #220011', cursor: 'not-allowed', fontFamily: 'Courier New, monospace', fontSize: '12px', fontWeight: 'bold', letterSpacing: '1px' }}>
-                [ PUBLICAR NO TIKTOK ]
-              </button>
-              <p style={{ color: '#2a2a2a', fontSize: '10px', margin: '10px 0 0', letterSpacing: '1px' }}>
-                Aguarda aprovação do TikTok Developer Portal
-              </p>
-            </div>
+          {/* ── TikTok upload ── */}
+          <div style={panel}>
+            <p style={{ color: '#ff0050', fontSize: '11px', letterSpacing: '1px', margin: '0 0 12px' }}>
+              ┌─ PUBLICAR NO TIKTOK {ttConnected && ttUser ? `· @${ttUser}` : ''}
+            </p>
+
+            {!ttConnected ? (
+              <div style={{ textAlign: 'center', padding: '10px 0' }}>
+                <p style={{ color: '#333333', fontSize: '11px', margin: '0 0 8px', letterSpacing: '1px' }}>
+                  TikTok não conectado
+                </p>
+                <p style={{ color: '#2a2a2a', fontSize: '10px', margin: 0, letterSpacing: '1px' }}>
+                  Vai a Settings → TikTok para conectar
+                </p>
+              </div>
+            ) : ttPhase === 'done' ? (
+              <div style={{ textAlign: 'center', padding: '10px 0' }}>
+                <p style={{ color: '#ff0050', fontSize: '13px', fontWeight: 'bold', letterSpacing: '2px', margin: '0 0 6px' }}>
+                  ✓ {ttMode === 'draft' ? 'RASCUNHO NO TIKTOK' : ttMode === 'scheduled' ? 'AGENDADO NO TIKTOK' : 'PUBLICADO NO TIKTOK'}
+                </p>
+                <p style={{ color: '#444444', fontSize: '10px', margin: '0 0 8px', letterSpacing: '1px' }}>
+                  {ttMode === 'draft' ? 'Abre o TikTok app → inbox para editar e publicar' : ttMode === 'scheduled' ? `Será publicado em ${ttScheduledAt ? new Date(ttScheduledAt).toLocaleString('pt-BR') : '—'}` : 'Publicado como privado · vai ao TikTok e torna público'}
+                </p>
+                <button onClick={() => { setTtPhase('idle'); setTtVideoFile(null); setTtDescription('') }}
+                  style={{ background: 'transparent', border: '1px solid #330015', color: '#660022', fontFamily: 'Courier New, monospace', fontSize: '10px', padding: '4px 12px', cursor: 'pointer', letterSpacing: '1px' }}
+                  onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = '#ff0050' }}
+                  onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = '#660022' }}
+                >[ NOVO UPLOAD ]</button>
+              </div>
+            ) : ttPhase === 'error' ? (
+              <div>
+                <p style={{ color: '#ff4400', fontSize: '11px', margin: '0 0 8px' }}>⚠ {ttError}</p>
+                <button onClick={() => { setTtPhase('idle'); setTtError(''); setTtVideoFile(null) }} style={{ ...retro, color: '#ff6600' }}
+                  onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = '#c0c0c0' }}
+                  onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = '#ff6600' }}>
+                  [ TENTAR NOVAMENTE ]
+                </button>
+              </div>
+            ) : ttPhase === 'uploading' ? (
+              <div>
+                <div style={{ height: 4, backgroundColor: '#1a1a1a', margin: '8px 0' }}>
+                  <div style={{ height: '100%', width: `${ttProgress}%`, backgroundColor: '#ff0050', transition: 'width 0.3s' }} />
+                </div>
+                <p style={{ color: '#ff0050', fontSize: '11px', letterSpacing: '1px', margin: 0 }}>
+                  A ENVIAR PARA TIKTOK — {ttProgress}%<span className="blink">_</span>
+                </p>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                <input ref={ttVideoInputRef} type="file" accept="video/*" style={{ display: 'none' }}
+                  onChange={e => { const f = e.target.files?.[0]; if (f) setTtVideoFile(f) }} />
+
+                {/* mode selector */}
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  {(['immediate', 'scheduled', 'draft'] as const).map(m => {
+                    const labels = { immediate: 'IMEDIATO', scheduled: 'AGENDADO', draft: 'RASCUNHO' }
+                    const active = ttMode === m
+                    return (
+                      <button key={m} onClick={() => setTtMode(m)}
+                        style={{
+                          flex: 1, padding: '5px 4px', fontFamily: 'Courier New, monospace',
+                          fontSize: '9px', letterSpacing: '1px', cursor: 'pointer',
+                          background: active ? '#1a0008' : 'transparent',
+                          color: active ? '#ff0050' : '#333',
+                          border: `1px solid ${active ? '#660022' : '#1a1a1a'}`,
+                        }}
+                        onMouseEnter={e => { if (!active) (e.currentTarget as HTMLElement).style.color = '#666' }}
+                        onMouseLeave={e => { if (!active) (e.currentTarget as HTMLElement).style.color = '#333' }}
+                      >{labels[m]}</button>
+                    )
+                  })}
+                </div>
+
+                {/* mode notes */}
+                {ttMode === 'immediate' && (
+                  <p style={{ color: '#2a2a2a', fontSize: '9px', margin: 0, letterSpacing: '0.5px' }}>
+                    Publica imediatamente como privado · tens de ir ao TikTok e tornar público (restrição sandbox)
+                  </p>
+                )}
+                {ttMode === 'scheduled' && (
+                  <p style={{ color: '#2a2a2a', fontSize: '9px', margin: 0, letterSpacing: '0.5px' }}>
+                    Agenda a publicação pública · requer app aprovada pelo TikTok · mín. 15min · máx. 10 dias
+                  </p>
+                )}
+                {ttMode === 'draft' && (
+                  <p style={{ color: '#2a2a2a', fontSize: '9px', margin: 0, letterSpacing: '0.5px' }}>
+                    Envia para o inbox do TikTok · editas e publicas no app · funciona já em sandbox
+                  </p>
+                )}
+
+                {/* datetime picker for scheduled */}
+                {ttMode === 'scheduled' && (
+                  <div>
+                    <p style={{ color: '#440020', fontSize: '9px', margin: '0 0 4px', letterSpacing: '1px' }}>DATA · HORA</p>
+                    <input
+                      type="datetime-local"
+                      value={ttScheduledAt}
+                      onChange={e => setTtScheduledAt(e.target.value)}
+                      min={new Date(Date.now() + 15 * 60 * 1000).toISOString().slice(0, 16)}
+                      max={new Date(Date.now() + 10 * 24 * 3600 * 1000).toISOString().slice(0, 16)}
+                      style={{
+                        width: '100%', boxSizing: 'border-box',
+                        background: '#0a0005', border: '1px solid #330015',
+                        color: '#ff0050', fontFamily: 'Courier New, monospace', fontSize: '11px',
+                        padding: '6px 8px', outline: 'none',
+                      }}
+                    />
+                  </div>
+                )}
+
+                {/* description / caption */}
+                <div>
+                  <p style={{ color: '#440020', fontSize: '9px', margin: '0 0 4px', letterSpacing: '1px' }}>CAPTION / DESCRIÇÃO <span style={{ color: '#330015' }}>(opcional)</span></p>
+                  <textarea
+                    value={ttDescription}
+                    onChange={e => setTtDescription(e.target.value)}
+                    maxLength={2200}
+                    rows={3}
+                    placeholder="Escreve a caption ou deixa vazio para gerar com IA"
+                    style={{
+                      width: '100%', boxSizing: 'border-box', resize: 'vertical',
+                      background: '#080808', border: '1px solid #1a000e',
+                      color: '#c0c0c0', fontFamily: 'Courier New, monospace', fontSize: '10px',
+                      padding: '6px 8px', outline: 'none',
+                    }}
+                  />
+                  <p style={{ color: '#1a1a1a', fontSize: '9px', margin: '2px 0 0', textAlign: 'right' }}>{ttDescription.length}/2200</p>
+                </div>
+
+                {/* file picker */}
+                <div
+                  onClick={() => ttVideoInputRef.current?.click()}
+                  style={{
+                    border: `2px dashed ${ttVideoFile ? '#ff0050' : '#2a2a2a'}`,
+                    padding: '12px', cursor: 'pointer', backgroundColor: '#080808',
+                    textAlign: 'center', transition: 'border-color 0.2s',
+                  }}
+                  onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = ttVideoFile ? '#ff4477' : '#444' }}
+                  onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = ttVideoFile ? '#ff0050' : '#2a2a2a' }}
+                >
+                  {ttVideoFile
+                    ? <p style={{ color: '#ff0050', fontSize: '11px', margin: 0, letterSpacing: '1px' }}>✓ {ttVideoFile.name.slice(0, 40)}{ttVideoFile.name.length > 40 ? '...' : ''}</p>
+                    : <p style={{ color: '#333', fontSize: '11px', margin: 0, letterSpacing: '1px' }}>SELECIONAR VÍDEO PARA TIKTOK</p>
+                  }
+                </div>
+
+                {/* upload button */}
+                <button
+                  disabled={!ttVideoFile || (ttMode === 'scheduled' && !ttScheduledAt)}
+                  onClick={async () => {
+                    if (!ttVideoFile) return
+                    if (ttMode === 'scheduled' && !ttScheduledAt) return
+                    setTtPhase('uploading')
+                    setTtProgress(0)
+                    setTtError('')
+                    try {
+                      const fd = new FormData()
+                      fd.append('video', ttVideoFile)
+                      if (ttDescription) fd.append('description', ttDescription)
+                      if (ttMode === 'draft') fd.append('isDraft', 'true')
+                      if (ttMode === 'scheduled' && ttScheduledAt) {
+                        fd.append('scheduledTime', String(Math.floor(new Date(ttScheduledAt).getTime() / 1000)))
+                      }
+                      const res = await fetch('/api/tiktok/upload', { method: 'POST', body: fd })
+                      if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`)
+                      const reader  = res.body.getReader()
+                      const decoder = new TextDecoder()
+                      let buf = ''
+                      outer: while (true) {
+                        const { done, value } = await reader.read()
+                        if (done) break
+                        buf += decoder.decode(value, { stream: true })
+                        const lines = buf.split('\n'); buf = lines.pop() ?? ''
+                        for (const line of lines) {
+                          if (!line.startsWith('data: ')) continue
+                          const payload = line.slice(6).trim()
+                          if (payload === '[DONE]') break outer
+                          try {
+                            const evt = JSON.parse(payload)
+                            if (evt.status === 'UPLOADING') setTtProgress(evt.progress ?? 0)
+                            if (evt.status === 'DONE') {
+                              setTtPhase('done')
+                              toast(ttMode === 'draft' ? 'Rascunho no inbox TikTok!' : ttMode === 'scheduled' ? 'Agendado no TikTok!' : 'Publicado no TikTok!')
+                            }
+                            if (evt.status === 'ERROR') throw new Error(evt.error || 'Erro no upload')
+                          } catch (inner: any) {
+                            if (!inner.message?.startsWith('Erro') && inner.message !== 'Erro no upload') continue
+                            throw inner
+                          }
+                        }
+                      }
+                    } catch (err: any) {
+                      setTtPhase('error')
+                      setTtError(err.message || 'Falha no upload TikTok')
+                    }
+                  }}
+                  style={{
+                    padding: '8px 20px',
+                    backgroundColor: ttVideoFile ? '#1a0008' : '#0a0005',
+                    color: ttVideoFile ? '#ff0050' : '#330011',
+                    border: `1px solid ${ttVideoFile ? '#440015' : '#1a000a'}`,
+                    cursor: ttVideoFile ? 'pointer' : 'not-allowed',
+                    fontFamily: 'Courier New, monospace', fontSize: '12px', fontWeight: 'bold', letterSpacing: '1px',
+                  }}
+                >
+                  {ttMode === 'draft' ? '[ ENVIAR PARA RASCUNHO ]' : ttMode === 'scheduled' ? '[ AGENDAR NO TIKTOK ]' : '[ PUBLICAR NO TIKTOK ]'}
+                </button>
+              </div>
+            )}
           </div>
         </>
       )}
@@ -1247,12 +1714,124 @@ export function Scheduler() {
             </div>
           )}
 
+          {/* TikTok auto-upload status */}
+          {publishTikTok && ttConnected && tiktokAutoStatus !== 'idle' && (
+            <div style={{ marginBottom: '20px', padding: '10px', border: `1px solid ${tiktokAutoStatus === 'done' ? '#3a1a22' : tiktokAutoStatus === 'error' ? '#330000' : '#3a1a22'}`, backgroundColor: '#100508' }}>
+              {tiktokAutoStatus === 'uploading' && (
+                <div>
+                  <p style={{ color: '#ff2d55', fontSize: '11px', letterSpacing: '1px', margin: '0 0 6px' }}>
+                    ↑ A ENVIAR PARA TIKTOK INBOX<span className="blink">_</span>
+                  </p>
+                  <div style={{ backgroundColor: '#1a0008', height: '4px', border: '1px solid #2a0010' }}>
+                    <div style={{ width: `${tiktokAutoProgress}%`, height: '100%', backgroundColor: '#ff2d55', transition: 'width 0.3s' }} />
+                  </div>
+                  <p style={{ color: '#441018', fontSize: '10px', margin: '4px 0 0' }}>{tiktokAutoProgress}%</p>
+                </div>
+              )}
+              {tiktokAutoStatus === 'done' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', alignItems: 'center' }}>
+                  <p style={{ color: '#ff2d55', fontSize: '11px', letterSpacing: '1px', margin: 0 }}>
+                    ✓ TIKTOK INBOX — vídeo pronto para publicar
+                  </p>
+                  <a
+                    href="https://www.tiktok.com/tiktokstudio/content"
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{
+                      color: '#ff2d55', fontSize: '11px', textDecoration: 'none',
+                      border: '1px solid #44001a', padding: '5px 16px', backgroundColor: '#1a0008',
+                      letterSpacing: '1px', fontFamily: 'Courier New, monospace',
+                    }}
+                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = '#ff2d55' }}
+                    onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = '#44001a' }}
+                  >
+                    ▶ ABRIR TIKTOK STUDIO ↗
+                  </a>
+                </div>
+              )}
+              {tiktokAutoStatus === 'error' && (
+                <p style={{ color: '#ff4400', fontSize: '11px', letterSpacing: '1px', margin: 0 }}>⚠ TikTok: {tiktokAutoError}</p>
+              )}
+            </div>
+          )}
+
           <button onClick={reset}
             style={{ padding: '12px 32px', backgroundColor: '#00ff00', color: '#000000', border: 'none', cursor: 'pointer', fontFamily: 'Courier New, monospace', fontSize: '13px', fontWeight: 'bold', letterSpacing: '2px' }}>
             [ ANALISAR OUTRO BEAT ]
           </button>
         </div>
       )}
+
+      {/* ══ GERADOR DE VÍDEO STANDALONE (Opção B) ══ */}
+      <div style={{ ...panel, marginTop: '24px' }}>
+        <p style={{ color: '#6666cc', fontSize: '11px', letterSpacing: '1px', margin: '0 0 14px' }}>
+          ┌─ GERADOR DE VÍDEO · ÁUDIO + FOOTAGE DE ARTISTAS ──────────
+        </p>
+        <p style={{ color: '#333', fontSize: '10px', margin: '0 0 12px' }}>
+          Carrega um MP3/WAV → o sistema busca footage de 15s de cada artista no YouTube → gera o vídeo final
+        </p>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <input value={vidGenAnchor} readOnly placeholder="Seleciona um beat da agenda"
+              style={{ flex: 1, backgroundColor: '#050508', border: '1px solid #1a1a2a', color: '#8888cc', fontSize: '11px', padding: '6px 8px', fontFamily: 'Courier New, monospace', cursor: 'default' }} />
+            <input value={vidGenSecondary} readOnly placeholder="Artista secundário"
+              style={{ flex: 1, backgroundColor: '#050508', border: '1px solid #1a1a2a', color: '#8888cc', fontSize: '11px', padding: '6px 8px', fontFamily: 'Courier New, monospace', cursor: 'default' }} />
+          </div>
+          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+            {GENRES.map(g => (
+              <button key={g} onClick={() => setVidGenGenre(g)}
+                style={{ padding: '4px 10px', fontSize: '10px', fontFamily: 'Courier New, monospace', letterSpacing: '1px', cursor: 'pointer', backgroundColor: vidGenGenre === g ? '#1a1a4a' : '#080810', border: `1px solid ${vidGenGenre === g ? '#6666cc' : '#1a1a2a'}`, color: vidGenGenre === g ? '#aaaaff' : '#444466' }}>
+                {g.toUpperCase()}
+              </button>
+            ))}
+          </div>
+          <div onClick={() => vidGenAudioRef.current?.click()} style={{
+            border: `2px dashed ${vidGenAudio ? '#00aaff' : '#1a1a2a'}`, padding: '14px',
+            cursor: 'pointer', backgroundColor: '#080810', textAlign: 'center',
+          }}>
+            {vidGenAudio
+              ? <p style={{ color: '#00aaff', fontSize: '12px', margin: 0 }}>♪ {vidGenAudio.name}</p>
+              : <><p style={{ color: '#333', fontSize: '20px', margin: '0 0 6px' }}>♪</p><p style={{ color: '#333', fontSize: '11px', margin: 0, letterSpacing: '1px' }}>CLIQUE PARA SELECIONAR MP3 / WAV</p></>}
+          </div>
+          <button
+            disabled={!vidGenAudio || !selectedPlanId || !vidGenAnchor || !vidGenSecondary || vidGenStatus === 'running'}
+            onClick={() => vidGenAudio && generateVideo(vidGenAnchor, vidGenSecondary, vidGenAudio, vidGenFilename || undefined, vidGenGenre || undefined)}
+            style={{ padding: '10px', backgroundColor: '#080810', border: `1px solid ${vidGenStatus === 'running' ? '#4444aa' : '#2a2a6a'}`, color: vidGenStatus === 'running' ? '#4444aa' : '#6666cc', fontSize: '11px', letterSpacing: '2px', cursor: 'pointer', fontFamily: 'Courier New, monospace' }}>
+            {vidGenStatus === 'running' ? '● A GERAR VÍDEO...' : '[ GERAR VÍDEO COM FOOTAGE DO YOUTUBE ]'}
+          </button>
+          {(vidGenStatus === 'running' || (vidGenStatus === 'error' && vidGenMsg)) && (
+            <div style={{ backgroundColor: '#040408', border: '1px solid #1a1a2a', padding: '10px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+                <span style={{ color: vidGenStatus === 'error' ? '#ff4444' : '#6666cc', fontSize: '11px', fontFamily: 'Courier New, monospace' }}>» {vidGenMsg || '...'}</span>
+                {vidGenStatus === 'running' && <span style={{ color: '#8888ff', fontSize: '11px', fontFamily: 'Courier New, monospace', fontWeight: 'bold' }}>{vidGenProgress}%</span>}
+              </div>
+              {vidGenStatus === 'running' && (
+                <div style={{ height: '6px', backgroundColor: '#0a0a14', border: '1px solid #1a1a2a' }}>
+                  <div style={{ height: '100%', width: `${vidGenProgress}%`, backgroundColor: '#4444aa', transition: 'width 0.4s ease' }} />
+                </div>
+              )}
+            </div>
+          )}
+          {vidGenStatus === 'done' && vidGenToken && (
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <a href={`/api/video-gen/download/${vidGenToken}`} download="type_beat_video.mp4"
+                style={{ flex: 1, padding: '10px', backgroundColor: '#040408', border: '1px solid #2a2a6a', color: '#6666cc', fontSize: '11px', letterSpacing: '1px', textAlign: 'center', textDecoration: 'none', fontFamily: 'Courier New, monospace', display: 'block' }}>
+                ↓ DESCARREGAR VÍDEO
+              </a>
+              <button onClick={() => useGeneratedVideo(vidGenToken)}
+                style={{ flex: 1, padding: '10px', backgroundColor: '#040808', border: '1px solid #1a3a1a', color: '#00cc44', fontSize: '11px', letterSpacing: '1px', cursor: 'pointer', fontFamily: 'Courier New, monospace' }}>
+                ✓ USAR PARA UPLOAD YOUTUBE
+              </button>
+            </div>
+          )}
+          {vidGenStatus === 'done' && (
+            <button onClick={() => { setVidGenStatus('idle'); setVidGenMsg(''); setVidGenProgress(0); setVidGenToken(null); setVidGenAudio(null); setVidGenFilename('') }}
+              style={{ padding: '6px', backgroundColor: 'transparent', border: '1px solid #1a1a1a', color: '#333', fontSize: '10px', cursor: 'pointer', fontFamily: 'Courier New, monospace', letterSpacing: '1px' }}>
+              [ GERAR OUTRO ]
+            </button>
+          )}
+        </div>
+      </div>
 
       {/* ══ HISTÓRICO ══ */}
       <UploadHistory refreshKey={histRefreshKey} />

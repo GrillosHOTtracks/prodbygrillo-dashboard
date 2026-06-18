@@ -3,16 +3,51 @@ const path         = require('path')
 const Groq         = require('groq-sdk')
 const { google }   = require('googleapis')
 const { jsonrepair } = require('jsonrepair')
+const { isQuotaError } = require('./apiError')
 
-const STATE_FILE  = path.join(__dirname, 'data/replies.json')
-// Run 2h after each auto-comment batch so replies are visible fast
-const INTERVAL_MS = 2 * 60 * 60 * 1000
+const STATE_FILE    = path.join(__dirname, 'data/replies.json')
+// 4 daily runs — 2h after each auto-comment batch (comments: 00/13/17/21 UTC)
+const SCHEDULE_UTC_HOURS = [2, 15, 19, 23]
 
 fs.mkdirSync(path.dirname(STATE_FILE), { recursive: true })
 if (!fs.existsSync(STATE_FILE)) fs.writeFileSync(STATE_FILE, '[]')
 
 function readReplied()     { try { return JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8')) } catch { return [] } }
 function writeReplied(arr) { fs.writeFileSync(STATE_FILE, JSON.stringify(arr, null, 2)) }
+
+// Strip HTML tags from YouTube API error messages (e.g. quota HTML response)
+function cleanErr(err) {
+  return String(err?.message || err).replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim()
+}
+
+function getNextRunTime() {
+  const now  = new Date()
+  const utcH = now.getUTCHours()
+  const utcM = now.getUTCMinutes()
+  for (const h of SCHEDULE_UTC_HOURS) {
+    if (h > utcH || (h === utcH && utcM < 1)) {
+      const next = new Date(now)
+      next.setUTCHours(h, 0, 0, 0)
+      return next
+    }
+  }
+  const next = new Date(now)
+  next.setUTCDate(next.getUTCDate() + 1)
+  next.setUTCHours(SCHEDULE_UTC_HOURS[0], 0, 0, 0)
+  return next
+}
+
+function scheduleNext() {
+  const next     = getNextRunTime()
+  const ms       = Math.max(60 * 1000, next.getTime() - Date.now())
+  nextRunAt      = Date.now() + ms
+  const localStr = new Date(nextRunAt).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' })
+  console.log(`[AUTO-REPLY] Next run at ${new Date(nextRunAt).toISOString()} (${localStr} BRT) — in ${Math.round(ms / 60000)}m`)
+  setTimeout(async () => {
+    await run()
+    scheduleNext()
+  }, ms)
+}
 
 function sanitizeText(t) {
   return String(t || '').replace(/[\x00-\x1F\x7F]/g, ' ').replace(/\s+/g, ' ').trim()
@@ -25,7 +60,7 @@ function extractJson(text) {
 }
 
 let running    = false
-let nextRunAt  = Date.now() + INTERVAL_MS
+let nextRunAt  = Date.now()
 let lastResult = null
 let accountMgr = null
 
@@ -39,71 +74,93 @@ async function run() {
     const replied    = readReplied()
     const repliedIds = new Set(replied.map(r => r.commentId))
 
-    const auth = accountMgr.getAuthClient()
-    const yt   = google.youtube({ version: 'v3', auth })
+    // Only reply to comments from the last 60 days — avoids digging into ancient threads
+    const CUTOFF_MS  = 60 * 24 * 60 * 60 * 1000
+    const cutoff     = Date.now() - CUTOFF_MS
 
-    // 1. Get channel's own videos (last 15)
-    const channelRes = await yt.channels.list({ part: ['contentDetails'], mine: true })
-    const uploadsId  = channelRes.data.items?.[0]?.contentDetails?.relatedPlaylists?.uploads
-    if (!uploadsId) throw new Error('Uploads playlist not found')
+    await accountMgr.withYouTube(async (auth) => {
+      const yt = google.youtube({ version: 'v3', auth })
 
-    const playlistRes = await yt.playlistItems.list({
-      part: ['contentDetails'], playlistId: uploadsId, maxResults: 15,
-    })
-    const videoIds = (playlistRes.data.items || []).map(i => i.contentDetails.videoId).filter(Boolean)
-    if (!videoIds.length) throw new Error('No videos found')
+      // 1. Get channel ID
+      const channelRes = await yt.channels.list({ part: ['id'], mine: true })
+      const channelId  = channelRes.data.items?.[0]?.id
+      if (!channelId) throw new Error('Channel not found')
 
-    // 2. For each video, collect unanswered top-level comments
-    const pending = []
-    for (const videoId of videoIds) {
-      try {
+      // 2. Fetch comment threads — paginate up to 3 pages (150 threads) so the bot
+      //    doesn't stop at the first 50 when all recent ones are already replied.
+      //    BUG FIX: previously only fetched 1 page → after a few days of running,
+      //    all 50 most-recent threads were in repliedIds → always "0 unreplied found".
+      const pending   = []
+      let   pageToken = undefined
+      let   page      = 0
+      const MAX_PAGES = 3
+
+      do {
         const threadsRes = await yt.commentThreads.list({
-          part: ['snippet'], videoId, maxResults: 20, order: 'time',
+          part:                        ['snippet'],
+          allThreadsRelatedToChannelId: channelId,
+          maxResults:                  50,
+          order:                       'time',
+          ...(pageToken ? { pageToken } : {}),
         })
-        for (const thread of (threadsRes.data.items || [])) {
-          const top     = thread.snippet?.topLevelComment?.snippet
-          const threadId = thread.id
-          const hasReply = thread.snippet?.totalReplyCount > 0
+        const items = threadsRes.data.items || []
+        console.log(`[AUTO-REPLY] Page ${page + 1}: ${items.length} threads fetched`)
 
-          // Skip: already replied, is own comment, too short, spam-like
+        for (const thread of items) {
+          if (pending.length >= 10) break
+
+          const top      = thread.snippet?.topLevelComment?.snippet
+          const threadId = thread.id
+          const videoId  = thread.snippet?.videoId
+
           if (!top || !threadId) continue
-          if (repliedIds.has(threadId)) continue
-          if (hasReply) continue  // already has replies (possibly ours)
-          if (!top.textDisplay || top.textDisplay.length < 5) continue
-          if (/http|www\.|\.com|spam/i.test(top.textDisplay)) continue
+
+          // Skip comments older than 60 days
+          const publishedAt = top.publishedAt ? new Date(top.publishedAt).getTime() : 0
+          if (publishedAt > 0 && publishedAt < cutoff) {
+            // Comments are ordered by time — once we hit a comment older than cutoff,
+            // all remaining on this and subsequent pages will also be older.
+            pageToken = undefined
+            break
+          }
+
+          const text = top.textDisplay || ''
+          if (top.authorChannelId?.value === channelId) continue  // our own comments
+          if (repliedIds.has(threadId))                continue  // already replied
+          if (text.trim().length < 1)                  continue  // skip truly empty
+          if (/http|www\.|\.com|spam/i.test(text))     continue
 
           pending.push({
             threadId, videoId,
             author: sanitizeText(top.authorDisplayName || 'viewer'),
-            text:   sanitizeText(top.textDisplay).slice(0, 200),
+            text:   sanitizeText(text).slice(0, 200),
           })
-          if (pending.length >= 10) break
         }
-      } catch (e) {
-        console.warn('[AUTO-REPLY] commentThreads.list failed for', videoId, ':', e.message)
+
+        pageToken = threadsRes.data.nextPageToken
+        page++
+      } while (pageToken && pending.length < 10 && page < MAX_PAGES)
+
+      console.log('[AUTO-REPLY] Total threads scanned:', page * 50, '| unreplied found:', pending.length)
+
+      if (!pending.length) {
+        console.log('[AUTO-REPLY] No unanswered comments found')
+        lastResult = { status: 'done', replied: 0, total: 0, results: [], message: 'Sem comentários para responder', finishedAt: new Date().toISOString() }
+        return
       }
-      if (pending.length >= 10) break
-    }
 
-    if (!pending.length) {
-      console.log('[AUTO-REPLY] No unanswered comments found')
-      lastResult = { status: 'done', replied: 0, message: 'Sem comentários para responder', finishedAt: new Date().toISOString() }
-      running = false
-      return
-    }
+      console.log('[AUTO-REPLY] Pending replies:', pending.length)
 
-    console.log('[AUTO-REPLY] Pending replies:', pending.length)
+      // 3. Generate replies via Groq
+      const apiKey = process.env.GROQ_API_KEY
+      if (!apiKey) throw new Error('GROQ_API_KEY não configurada')
+      const groq = new Groq({ apiKey })
 
-    // 3. Generate replies via Groq
-    const apiKey = process.env.GROQ_API_KEY
-    if (!apiKey) throw new Error('GROQ_API_KEY não configurada')
-    const groq = new Groq({ apiKey })
+      const commentList = pending.map((c, i) =>
+        `${i + 1}. threadId="${c.threadId}" | author="${c.author}" | comment="${c.text}"`
+      ).join('\n')
 
-    const commentList = pending.map((c, i) =>
-      `${i + 1}. threadId="${c.threadId}" | author="${c.author}" | comment="${c.text}"`
-    ).join('\n')
-
-    const prompt = `You are prodbygrillo, a Brazilian music producer who sells beats on BeatStars. Reply to comments left on your YouTube videos.
+      const prompt = `You are prodbygrillo, a Brazilian music producer who sells beats on BeatStars. Reply to comments left on your YouTube videos.
 
 Comments to reply to:
 ${commentList}
@@ -121,48 +178,62 @@ Rules:
 Reply ONLY in valid JSON:
 {"replies":[{"threadId":"ID","reply":"..."}]}`
 
-    const resp = await groq.chat.completions.create({
-      model: 'llama-3.3-70b-versatile',
-      max_tokens: 800,
-      messages: [{ role: 'user', content: prompt }],
-    })
-    const raw    = resp.choices[0]?.message?.content || ''
-    const parsed = extractJson(raw)
-    const replyMap = {}
-    ;(parsed.replies || []).forEach(r => { replyMap[r.threadId] = r.reply })
+      const resp = await groq.chat.completions.create({
+        model:      'llama-3.3-70b-versatile',
+        max_tokens: 800,
+        messages:   [{ role: 'user', content: prompt }],
+      })
+      const raw      = resp.choices[0]?.message?.content || ''
+      const parsed   = extractJson(raw)
+      const replyMap = {}
+      ;(parsed.replies || []).forEach(r => { replyMap[r.threadId] = r.reply })
 
-    // 4. Post replies
-    const results = []
-    for (const c of pending) {
-      const text = replyMap[c.threadId]
-      if (!text) continue
-      try {
-        await yt.comments.insert({
-          part: ['snippet'],
-          requestBody: {
-            snippet: {
-              parentId:     c.threadId,
-              textOriginal: text,
+      // 4. Post replies
+      const results = []
+      for (const c of pending) {
+        const text = replyMap[c.threadId]
+        if (!text) continue
+        try {
+          await yt.comments.insert({
+            part:        ['snippet'],
+            requestBody: {
+              snippet: {
+                parentId:     c.threadId,
+                textOriginal: text,
+              },
             },
-          },
-        })
-        console.log('[AUTO-REPLY] Replied to', c.threadId, '|', c.author, '→', text.slice(0, 40))
-        results.push({ threadId: c.threadId, author: c.author, originalComment: c.text, reply: text, ok: true })
-        replied.push({ commentId: c.threadId, videoId: c.videoId, author: c.author, reply: text, repliedAt: new Date().toISOString() })
-        writeReplied(replied)
-        await new Promise(r => setTimeout(r, 5000))
-      } catch (err) {
-        console.error('[AUTO-REPLY] Failed on', c.threadId, ':', err.message)
-        results.push({ threadId: c.threadId, author: c.author, ok: false, error: err.message })
+          })
+          console.log('[AUTO-REPLY] Replied to', c.threadId, '|', c.author, '→', text.slice(0, 40))
+          results.push({ threadId: c.threadId, author: c.author, originalComment: c.text, reply: text, ok: true })
+          replied.push({ commentId: c.threadId, videoId: c.videoId, author: c.author, reply: text, repliedAt: new Date().toISOString() })
+          writeReplied(replied)
+          await new Promise(r => setTimeout(r, 5000))
+        } catch (err) {
+          const msg = cleanErr(err)
+          console.error('[AUTO-REPLY] Failed on', c.threadId, ':', msg)
+          results.push({ threadId: c.threadId, author: c.author, ok: false, error: msg })
+          // Abort remaining if quota hit mid-run
+          if (isQuotaError(err)) {
+            console.warn('[AUTO-REPLY] Quota exceeded mid-run — stopping early')
+            break
+          }
+        }
       }
-    }
 
-    const successCount = results.filter(r => r.ok).length
-    console.log('[AUTO-REPLY] Done:', successCount, '/', results.length)
-    lastResult = { status: 'done', replied: successCount, total: results.length, results, finishedAt: new Date().toISOString() }
+      const successCount = results.filter(r => r.ok).length
+      console.log('[AUTO-REPLY] Done:', successCount, '/', results.length)
+      lastResult = { status: 'done', replied: successCount, total: results.length, results, finishedAt: new Date().toISOString() }
+    }) // withYouTube
+
   } catch (err) {
-    console.error('[AUTO-REPLY] Error:', err.message)
-    lastResult = { status: 'error', error: err.message, finishedAt: new Date().toISOString() }
+    const msg = cleanErr(err)
+    console.error('[AUTO-REPLY] Error:', msg)
+    // Provide a user-friendly message for quota errors
+    if (isQuotaError(err)) {
+      lastResult = { status: 'error', error: 'Quota YouTube esgotada — reset às 08:00 UTC', finishedAt: new Date().toISOString() }
+    } else {
+      lastResult = { status: 'error', error: msg, finishedAt: new Date().toISOString() }
+    }
   } finally {
     running = false
   }
@@ -171,11 +242,8 @@ Reply ONLY in valid JSON:
 function start(mgr) {
   accountMgr = mgr
   const total = readReplied().length
-  console.log('[AUTO-REPLY] Scheduler started — interval: 2h | total replies so far:', total)
-  setInterval(async () => {
-    nextRunAt = Date.now() + INTERVAL_MS
-    await run()
-  }, INTERVAL_MS)
+  console.log('[AUTO-REPLY] Scheduler started — 4x/day (02/15/19/23 UTC) | total replies so far:', total)
+  scheduleNext()
 }
 
 function getStatus() {
@@ -183,6 +251,7 @@ function getStatus() {
   const today   = new Date().toISOString().slice(0, 10)
   return {
     running,
+    schedule:     SCHEDULE_UTC_HOURS.map(h => `${String(h).padStart(2,'0')}:00 UTC`).join(' · '),
     nextRunAt:    new Date(nextRunAt).toISOString(),
     msUntilNext:  Math.max(0, nextRunAt - Date.now()),
     todayReplied: replied.filter(r => r.repliedAt?.startsWith(today)).length,

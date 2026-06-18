@@ -33,7 +33,7 @@ router.get('/', async (req, res) => {
   }
 
   try {
-    const result = await accountManager.withYouTube(async (auth) => {
+    const result = await accountManager.withPrimaryYouTube(async (auth) => {
       const youtube = google.youtube({ version: 'v3', auth })
       const { data } = await youtube.channels.list({
         part: ['snippet', 'statistics', 'contentDetails'],
@@ -69,7 +69,7 @@ router.get('/', async (req, res) => {
       if (channelId) {
         // Step 1: API key fallback — channels.list?id= costs only 1 unit
         try {
-          const pub = await accountManager.withPublicYouTube(async (auth) => {
+          const pub = await accountManager.withPublicYouTube(async ({ auth }) => {
             const youtube = google.youtube({ version: 'v3', auth })
             const { data } = await youtube.channels.list({
               part: ['snippet', 'statistics', 'contentDetails'],
@@ -143,4 +143,7 @@ router.get('/', async (req, res) => {
   }
 })
 
+function clearMemCache() { _mem = null }
+
 module.exports = router
+module.exports.clearMemCache = clearMemCache

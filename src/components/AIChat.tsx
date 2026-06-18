@@ -24,11 +24,13 @@ interface ChatContext {
 }
 
 const SUGGESTIONS = [
+  'O que devo criar hoje?',
+  'Quais beats tenho planeados esta semana?',
+  'Que beat publicar amanhã?',
   'Por que meu canal caiu essa semana?',
   'Qual meu melhor horário para postar?',
   'Quais vídeos estão performando melhor?',
   'Como aumentar meu CTR?',
-  'De onde vem a maioria do meu tráfego?',
   'Estou a crescer ou a cair?',
 ]
 

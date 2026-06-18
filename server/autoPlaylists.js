@@ -4,12 +4,16 @@ const fs         = require('fs')
 const path       = require('path')
 const { google } = require('googleapis')
 
-const STATE_FILE = path.join(__dirname, 'data/playlists.json')
+const STATE_FILE    = path.join(__dirname, 'data/playlists.json')
+const ASSIGNED_FILE = path.join(__dirname, 'data/playlists_assigned.json')
 fs.mkdirSync(path.dirname(STATE_FILE), { recursive: true })
-if (!fs.existsSync(STATE_FILE)) fs.writeFileSync(STATE_FILE, '{}')
+if (!fs.existsSync(STATE_FILE))    fs.writeFileSync(STATE_FILE,    '{}')
+if (!fs.existsSync(ASSIGNED_FILE)) fs.writeFileSync(ASSIGNED_FILE, '[]')
 
-function readState()     { try { return JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8')) } catch { return {} } }
-function writeState(s)   { fs.writeFileSync(STATE_FILE, JSON.stringify(s, null, 2)) }
+function readState()          { try { return JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8')) }    catch { return {} } }
+function writeState(s)        { fs.writeFileSync(STATE_FILE,    JSON.stringify(s, null, 2)) }
+function readAssigned()       { try { return new Set(JSON.parse(fs.readFileSync(ASSIGNED_FILE, 'utf-8'))) } catch { return new Set() } }
+function markAssigned(vid)    { const s = readAssigned(); s.add(vid); fs.writeFileSync(ASSIGNED_FILE, JSON.stringify([...s], null, 2)) }
 
 // Detect beat style from title
 const STYLE_RULES = [
@@ -56,6 +60,9 @@ async function getOrCreatePlaylist(yt, style, state) {
 }
 
 async function addToPlaylist(yt, playlistId, videoId) {
+  // Skip if already recorded as assigned — avoids burning 50 quota units per re-insert
+  const assigned = readAssigned()
+  if (assigned.has(videoId)) return false
   try {
     await yt.playlistItems.insert({
       part: ['snippet'],
@@ -63,10 +70,12 @@ async function addToPlaylist(yt, playlistId, videoId) {
         snippet: { playlistId, resourceId: { kind: 'youtube#video', videoId } },
       },
     })
+    markAssigned(videoId)
     return true
   } catch (err) {
-    // already in playlist or other error
-    if (!err.message?.includes('duplicate')) {
+    if (err.message?.includes('duplicate')) {
+      markAssigned(videoId)  // already there — record so we never try again
+    } else {
       console.warn('[AUTO-PLAYLIST] addToPlaylist error:', err.message)
     }
     return false
@@ -142,9 +151,7 @@ async function scanAll() {
 function start(mgr) {
   accountMgr = mgr
   const state = readState()
-  console.log('[AUTO-PLAYLIST] Started — playlists:', Object.keys(state).length || 'none yet')
-  // Full scan 30s after startup (give server time to settle)
-  setTimeout(scanAll, 30000)
+  console.log('[AUTO-PLAYLIST] Started (manual only) — playlists:', Object.keys(state).length || 'none yet')
 }
 
 function getStatus() {

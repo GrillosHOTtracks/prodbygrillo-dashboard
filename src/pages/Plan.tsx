@@ -1,16 +1,9 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import type { Page } from '../types'
 import type { DailyRow, ChannelInfo, Video as ApiVideo } from '../lib/api'
+import { useToast } from '../components/ui/Toast'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-interface EngagementItem {
-  videoId: string
-  title:   string
-  channel: string
-  artist:  string
-  comment: string
-}
-
 interface CheckItem {
   id: string
   text: string
@@ -52,14 +45,7 @@ const panel: React.CSSProperties = {
   borderRight: `2px solid ${S.border}`, borderBottom: `2px solid ${S.border}`,
   padding: '14px',
 }
-const panelGreen: React.CSSProperties = {
-  ...panel,
-  borderTopColor: S.greenD, borderLeftColor: S.greenD,
-  backgroundColor: '#080808',
-}
-const dim: React.CSSProperties = {
-  color: S.muted, fontSize: '10px', letterSpacing: '1px', margin: 0,
-}
+
 const label: React.CSSProperties = {
   color: S.muted, fontSize: '9px', letterSpacing: '2px', textTransform: 'uppercase', margin: 0,
 }
@@ -205,22 +191,27 @@ interface PlanProps {
 }
 
 export function Plan({ channelInfo, analyticsData, videos, onNavigate }: PlanProps) {
+  const toast = useToast()
   const [plan, setPlan]       = useState<PlanData | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError]     = useState('')
 
-  const [engagement, setEngagement] = useState<EngagementItem[] | null>(null)
-  const [engLoading, setEngLoading] = useState(false)
-  const [engError, setEngError]     = useState('')
-  const [engDone, setEngDone]       = useState<Record<string, boolean>>({})
-
+  const [autoShStatus,  setAutoShStatus]  = useState<any>(null)
   const [autoComStatus, setAutoComStatus] = useState<any>(null)
   const [autoRepStatus, setAutoRepStatus] = useState<any>(null)
   const [autoPlStatus,  setAutoPlStatus]  = useState<any>(null)
   const [autoSeoStatus, setAutoSeoStatus] = useState<any>(null)
-  const [comExpanded, setComExpanded]     = useState(false)
+  const [autoTtStatus,  setAutoTtStatus]  = useState<any>(null)
+  const [ttRepStatus,   setTtRepStatus]   = useState<any>(null)
+  const [ttUser,        setTtUser]        = useState<string | null>(null)
+  const [ttRunMode,     setTtRunMode]     = useState<'immediate'|'scheduled'|'draft'>('immediate')
+  const [ttRunSched,    setTtRunSched]    = useState('')   // datetime-local string
+  const [ttVideos,      setTtVideos]      = useState<any[] | null>(null)
+  const [ttVidsLoading, setTtVidsLoading] = useState(false)
+  const [ttDeleting,    setTtDeleting]    = useState<string | null>(null)
   const [repExpanded, setRepExpanded]     = useState(false)
   const [engineExpanded, setEngineExpanded] = useState(false)
+  const [acctStatus, setAcctStatus]       = useState<any>(null)
 
   function fmtCountdown(ms: number) {
     if (!ms || ms <= 0) return '—'
@@ -231,108 +222,101 @@ export function Plan({ channelInfo, analyticsData, videos, onNavigate }: PlanPro
     return h > 0 ? `${h}h${m.toString().padStart(2, '0')}m` : `${m}m`
   }
 
+  function loadAcctStatus() {
+    fetch('/api/accounts/status').then(r => r.ok ? r.json() : null).then(d => { if (d) setAcctStatus(d) }).catch(() => {})
+  }
+
+
   function loadAllEngineStatus() {
+    loadAcctStatus()
     const apis = [
-      ['/api/plan/comments-status',  setAutoComStatus],
-      ['/api/plan/replies-status',   setAutoRepStatus],
-      ['/api/plan/playlists-status', setAutoPlStatus],
-      ['/api/plan/seo-status',       setAutoSeoStatus],
+      ['/api/upload/auto-shorts/status', setAutoShStatus],
+      ['/api/plan/comments-status',      setAutoComStatus],
+      ['/api/plan/replies-status',       setAutoRepStatus],
+      ['/api/plan/playlists-status',     setAutoPlStatus],
+      ['/api/plan/seo-status',           setAutoSeoStatus],
+      ['/api/tiktok/auto-status',        setAutoTtStatus],
+      ['/api/tiktok/replies-status',     setTtRepStatus],
     ] as const
     apis.forEach(([url, setter]) => {
       fetch(url).then(r => r.ok ? r.json() : null).then(d => { if (d) setter(d) }).catch(() => {})
     })
   }
 
+  function loadAutoShStatus()  { fetch('/api/upload/auto-shorts/status').then(r => r.ok ? r.json() : null).then(d => { if (d) setAutoShStatus(d) }).catch(() => {}) }
   function loadAutoComStatus() { fetch('/api/plan/comments-status').then(r => r.ok ? r.json() : null).then(d => { if (d) setAutoComStatus(d) }).catch(() => {}) }
   function loadAutoRepStatus() { fetch('/api/plan/replies-status').then(r => r.ok ? r.json() : null).then(d => { if (d) setAutoRepStatus(d) }).catch(() => {}) }
 
+  function runShNow() {
+    setAutoShStatus((s: any) => s ? { ...s, running: true } : s)
+    fetch('/api/upload/auto-shorts/run-now', { method: 'POST' }).then(() => setTimeout(loadAutoShStatus, 2000)).catch(() => {})
+    toast('AUTO-SHORTS iniciado')
+  }
   function runComNow() {
     setAutoComStatus((s: any) => s ? { ...s, running: true } : s)
     fetch('/api/plan/run-comments', { method: 'POST' }).then(() => setTimeout(loadAutoComStatus, 1500)).catch(() => {})
+    toast('AUTO-COMMENTS iniciado')
   }
   function runRepNow() {
     setAutoRepStatus((s: any) => s ? { ...s, running: true } : s)
     fetch('/api/plan/run-replies', { method: 'POST' }).then(() => setTimeout(loadAutoRepStatus, 1500)).catch(() => {})
+    toast('AUTO-REPLIES iniciado')
   }
   function runPlNow() {
     setAutoPlStatus((s: any) => s ? { ...s, running: true } : s)
     fetch('/api/plan/run-playlists', { method: 'POST' }).then(() => setTimeout(() => fetch('/api/plan/playlists-status').then(r => r.json()).then(setAutoPlStatus), 2000)).catch(() => {})
+    toast('AUTO-PLAYLISTS a fazer scan...')
   }
   function runSeoNow() {
     setAutoSeoStatus((s: any) => s ? { ...s, running: true } : s)
     fetch('/api/plan/run-seo', { method: 'POST' }).then(() => setTimeout(() => fetch('/api/plan/seo-status').then(r => r.json()).then(setAutoSeoStatus), 2000)).catch(() => {})
+    toast('AUTO-SEO iniciado')
+  }
+  async function loadTtVideos() {
+    setTtVidsLoading(true)
+    try {
+      const r = await fetch('/api/tiktok/videos')
+      if (r.ok) setTtVideos(await r.json())
+    } catch {}
+    setTtVidsLoading(false)
+  }
+  async function deleteTtVideo(id: string) {
+    setTtDeleting(id)
+    try {
+      const r = await fetch(`/api/tiktok/videos/${id}`, { method: 'DELETE' })
+      if (r.ok) {
+        setTtVideos(v => v ? v.filter(x => x.id !== id) : v)
+        toast('Vídeo TikTok apagado')
+      } else {
+        const d = await r.json()
+        toast(`Erro: ${d.error}`)
+      }
+    } catch { toast('Erro ao apagar') }
+    setTtDeleting(null)
+  }
+
+  function runTtNow() {
+    if (ttRunMode === 'scheduled' && !ttRunSched) { toast('Define a data/hora primeiro'); return }
+    setAutoTtStatus((s: any) => s ? { ...s, running: true } : s)
+    const body: any = {}
+    if (ttRunMode === 'draft') body.isDraft = true
+    if (ttRunMode === 'scheduled' && ttRunSched) body.scheduledTime = Math.floor(new Date(ttRunSched).getTime() / 1000)
+    fetch('/api/tiktok/auto-run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      .then(() => setTimeout(() => fetch('/api/tiktok/auto-status').then(r => r.json()).then(setAutoTtStatus), 2000))
+      .catch(() => {})
+    toast('AUTO-TIKTOK iniciado')
+  }
+  function runTtRepliesNow() {
+    setTtRepStatus((s: any) => s ? { ...s, running: true } : s)
+    fetch('/api/tiktok/run-replies', { method: 'POST' }).then(() => setTimeout(() => fetch('/api/tiktok/replies-status').then(r => r.json()).then(setTtRepStatus), 3000)).catch(() => {})
+    toast('TikTok replies iniciado')
   }
 
   const today = todayStr()
 
   useEffect(() => {
-    try { const s = localStorage.getItem(`plan_${today}`);       if (s) setPlan(JSON.parse(s)) } catch {}
-    try { const s = localStorage.getItem(`engagement_${today}`); if (s) setEngagement(JSON.parse(s)) } catch {}
-    try { const s = localStorage.getItem(`eng_done_${today}`);    if (s) setEngDone(JSON.parse(s)) } catch {}
+    try { const s = localStorage.getItem(`plan_${today}`); if (s) setPlan(JSON.parse(s)) } catch {}
   }, [today])
-
-  function toggleEngDone(id: string) {
-    setEngDone(prev => {
-      const next = { ...prev, [id]: !prev[id] }
-      localStorage.setItem(`eng_done_${today}`, JSON.stringify(next))
-      return next
-    })
-  }
-
-
-  const fetchEngagement = useCallback(async (bust = false) => {
-    if (engLoading) return
-    setEngLoading(true); setEngError('')
-    try {
-      const tRes = await fetch('/api/trending')
-      if (!tRes.ok) throw new Error(`trending HTTP ${tRes.status}`)
-      const tData = await tRes.json() as Array<{ name: string }>
-      const artists: string[] = tData.map(a => a.name).filter(Boolean)
-      if (!artists.length) throw new Error('Sem artistas em trending — tenta mais tarde')
-      const pool     = bust ? [...artists].sort(() => Math.random() - 0.5) : artists
-      const selected = pool.slice(0, 5)
-      const avRes = await fetch(`/api/trending/artist-videos?artists=${encodeURIComponent(selected.join(','))}`)
-      if (!avRes.ok) throw new Error(`artist-videos HTTP ${avRes.status}`)
-      const avData = await avRes.json() as { videos: Array<{ artist: string; videoId: string; title: string; channel: string }> }
-      const artistVids = avData.videos.filter(v => v.videoId)
-      if (!artistVids.length) throw new Error('Não foi possível encontrar vídeos dos artistas')
-      const videoList = artistVids.map((v, i) =>
-        `${i + 1}. videoId="${v.videoId}" | artist="${v.artist}" | title="${v.title.slice(0, 70)}"`
-      ).join('\n')
-      const question = `You are a music producer leaving comments on official artist YouTube videos. Be strategic but authentic.
-
-Videos:
-${videoList}
-
-For EACH video write ONE comment in English (15-20 words, casual tone).
-
-Rules:
-- Sound like a genuine music fan / fellow musician — NOT spam, NOT a promoter
-- Subtly hint that you produce beats in that style WITHOUT saying it directly
-- NEVER use: "beat", "type beat", BeatStars, links, or direct self-promotion
-- Subtle hints: "This vibe is exactly what I've been working on lately", "Been deep in this sound for weeks", "This hits different every time"
-- Be specific to the artist's known sound — not generic
-- Vary tone per video: admiration, personal/reflective, hype
-
-Reply ONLY in valid JSON (no markdown, no text before or after):
-{"comments":[{"videoId":"ID","comment":"..."}]}`
-      const full   = await laisChat(question, 1200, PLAN_SYSTEM_PROMPT)
-      const parsed = extractJson(full) as { comments: { videoId: string; comment: string }[] }
-      const commentMap: Record<string, string> = {}
-      parsed.comments.forEach(c => { commentMap[c.videoId] = c.comment ?? '' })
-      const result: EngagementItem[] = artistVids.map(v => ({
-        videoId: v.videoId, title: v.title, channel: v.channel,
-        artist: v.artist, comment: commentMap[v.videoId] ?? '',
-      }))
-      setEngagement(result)
-      localStorage.setItem(`engagement_${today}`, JSON.stringify(result))
-    } catch (err: any) {
-      console.warn('[engagement]', err.message)
-      setEngError(err.message)
-    } finally {
-      setEngLoading(false)
-    }
-  }, [engLoading, today])
 
   const fetchPlan = useCallback(async () => {
     if (loading) return
@@ -358,6 +342,17 @@ Reply ONLY in valid JSON (no markdown, no text before or after):
     const yesterdayIds = (() => {
       try { const y = localStorage.getItem(`plan_${yesterday}`); if (!y) return ''; return (JSON.parse(y).checklist as CheckItem[]).map(i => i.id).join(', ') } catch { return '' }
     })()
+    const topByViews = [...(videos ?? [])]
+      .sort((a, b) => (b.views ?? 0) - (a.views ?? 0))
+      .slice(0, 15)
+    const topVideosBlock = topByViews.length
+      ? '\n\nTOP VÍDEOS DO CANAL (por views — usa para inferir quais artistas e géneros convertem melhor):\n' +
+        topByViews.map((v, i) => {
+          const artist = (v.title ?? '').match(/\[FREE\]\s+(.+?)\s+Type Beat/i)?.[1] ?? '?'
+          return `${i + 1}. "${(v.title ?? '').slice(0, 60)}" · ${(v.views ?? 0).toLocaleString()} views · CTR ${v.ctr?.toFixed(1) ?? '?'}% · ${(v.publishedAt ?? '').slice(0, 10)} · artista inferido: ${artist}`
+        }).join('\n')
+      : ''
+
     const question = `És a LAIS — estrategista de crescimento para canais de beats no YouTube, treinada nas metodologias de Sean Cannell (Think Media), Paddy Galloway e Nick Nimmin.
 
 ESTADO REAL DO CANAL "${channelName}" — ${dayOfWeek}, ${dateStr}:
@@ -367,7 +362,7 @@ ESTADO REAL DO CANAL "${channelName}" — ${dayOfWeek}, ${dateStr}:
 - Watch time acumulado: ${Math.round(allWatchMin / 60)}h / 4.000h (meta YPP)
 - Último vídeo: "${lastVideoTitle}" · há ${lastDaysAgo} dias · ${lastVideoViews.toLocaleString()} views · CTR ${lastVideoCtr}%
 - Semente de variação: ${today}
-- IDs de tarefas de ontem (NÃO repetir): [${yesterdayIds || 'nenhum'}]
+- IDs de tarefas de ontem (NÃO repetir): [${yesterdayIds || 'nenhum'}]${topVideosBlock}
 
 PILARES DE CRESCIMENTO — CANAIS DE BEATS 2026 (roda de forma diferente cada dia):
 ① UPLOAD — frequência semanal, horário peak, formato "[FREE] Artista x Artista Type Beat 2026"
@@ -379,7 +374,7 @@ PILARES DE CRESCIMENTO — CANAIS DE BEATS 2026 (roda de forma diferente cada di
 ⑦ MONETIZAÇÃO — link BeatStars na bio, pricing visível, teaser de exclusivo
 ⑧ COMUNIDADE — community post, collab com outro produtor, responder DMs
 
-Gera os insights estratégicos do dia para o canal. Foca em observações que o produtor NÃO consegue ver sozinho — padrões, oportunidades de nicho, timing de tendências.
+Gera os insights estratégicos do dia para o canal. Usa os TOP VÍDEOS para identificar quais artistas e géneros já provaram converter neste canal — prioriza sugestões baseadas nesses padrões reais. Foca em observações que o produtor NÃO consegue ver sozinho — padrões, oportunidades de nicho, timing de tendências, e próximos artistas a explorar com base no histórico de views.
 Responde APENAS em JSON válido (sem markdown, sem texto antes ou depois):
 {
   "dayContext": "1 frase sobre hoje — contexto de mercado, ex: Terça à tarde tem peak de pesquisa de beats trap. Artistas X e Y em alta.",
@@ -401,8 +396,16 @@ REGRAS: checklist deve ser array vazio [] · insights máximo 3 · português de
       const full   = await laisChat(question, 2048, PLAN_SYSTEM_PROMPT)
       const parsed = extractJson(full) as PlanData
       parsed.date = today
+      // Always override weeklyGoal with real values — AI often returns wrong watchTarget
+      parsed.weeklyGoal = {
+        subsProgress: channelInfo?.subscribers ?? 0,
+        subsTarget:   1000,
+        watchMinutes: Math.round(allWatchMin),
+        watchTarget:  240000,
+      }
       setPlan(parsed)
       localStorage.setItem(`plan_${today}`, JSON.stringify(parsed))
+      toast('Plano do dia gerado pela LAIS')
     } catch (err: any) {
       setError(err.message)
     } finally {
@@ -410,35 +413,61 @@ REGRAS: checklist deve ser array vazio [] · insights máximo 3 · português de
     }
   }, [loading, channelInfo, analyticsData, videos, today])
 
+  // Poll quota every 10s so the bars update in near-real-time
   useEffect(() => {
-    if (!localStorage.getItem(`plan_${today}`))       fetchPlan()
-    if (!localStorage.getItem(`engagement_${today}`)) fetchEngagement()
+    const iv = setInterval(loadAcctStatus, 10000)
+    return () => clearInterval(iv)
+  }, [])
+
+  useEffect(() => {
+    if (!localStorage.getItem(`plan_${today}`)) fetchPlan()
     loadAllEngineStatus()
+    fetch('/api/tiktok/status').then(r => r.ok ? r.json() : null).then((d: any) => {
+      if (d?.user?.display_name) setTtUser(d.user.display_name)
+    }).catch(() => {})
   }, []) // eslint-disable-line
 
-  const anyRunning = autoComStatus?.running || autoRepStatus?.running || autoPlStatus?.running || autoSeoStatus?.running
+  const anyRunning = autoShStatus?.running || autoComStatus?.running || autoRepStatus?.running || autoPlStatus?.running || autoSeoStatus?.running
   useEffect(() => {
     const iv = setInterval(loadAllEngineStatus, anyRunning ? 3000 : 30000)
     return () => clearInterval(iv)
   }, [anyRunning])
+
+  // Detect engine job completions (running true→false) and fire toast
+  const prevRunning = useRef({ sh: false, com: false, rep: false, pl: false, seo: false })
+  useEffect(() => {
+    const jobs = [
+      { key: 'sh'  as const, st: autoShStatus,  label: 'AUTO-SHORTS',
+        msg: (r: any) => r.title ? `Short "${r.title}" publicado` : 'AUTO-SHORTS concluído' },
+      { key: 'com' as const, st: autoComStatus, label: 'AUTO-COMMENTS',
+        msg: (r: any) => `AUTO-COMMENTS — ${r.posted ?? 0} comentários postados` },
+      { key: 'rep' as const, st: autoRepStatus, label: 'AUTO-REPLIES',
+        msg: (r: any) => `AUTO-REPLIES — ${r.replied ?? 0} respostas enviadas` },
+      { key: 'pl'  as const, st: autoPlStatus,  label: 'AUTO-PLAYLISTS',
+        msg: (r: any) => `AUTO-PLAYLISTS — ${r.videosOrganised ?? 0} vídeos organizados` },
+      { key: 'seo' as const, st: autoSeoStatus, label: 'AUTO-SEO',
+        msg: (r: any) => `AUTO-SEO — ${r.updated ?? 0}/${r.total ?? 0} vídeos atualizados` },
+    ]
+    for (const { key, st, label, msg } of jobs) {
+      const wasRunning = prevRunning.current[key]
+      const isRunning  = st?.running ?? false
+      if (wasRunning && !isRunning && st?.lastResult) {
+        if (st.lastResult.status === 'done')  toast(msg(st.lastResult))
+        if (st.lastResult.status === 'error') toast(`${label} — erro: ${String(st.lastResult.error ?? '').slice(0, 50)}`)
+      }
+      prevRunning.current[key] = isRunning
+    }
+  }, [autoShStatus, autoComStatus, autoRepStatus, autoPlStatus, autoSeoStatus]) // eslint-disable-line
 
   useEffect(() => {
     const now = new Date()
     const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
     const tid = setTimeout(() => {
       setPlan(null); fetchPlan()
-      setEngagement(null); setEngDone({}); fetchEngagement()
     }, tomorrow.getTime() - now.getTime())
     return () => clearTimeout(tid)
   }, []) // eslint-disable-line
 
-
-  const jobPostedIds = new Set<string>(
-    (autoComStatus?.todayEntries ?? []).map((e: any) => e.videoId)
-  )
-  const engDoneCount = (engagement ?? []).filter(
-    item => !!engDone[item.videoId] || jobPostedIds.has(item.videoId)
-  ).length
 
   // ─── Render ─────────────────────────────────────────────────────────────────
   return (
@@ -475,7 +504,7 @@ REGRAS: checklist deve ser array vazio [] · insights máximo 3 · português de
           <span style={{ color: S.greenD, fontSize: '9px', letterSpacing: '2px' }}>⚡ ALGORITHM ENGINE</span>
           {anyRunning && <span style={{ color: S.yellow, fontSize: '9px' }} className="blink">● A CORRER</span>}
           <div style={{ marginLeft: 'auto', display: 'flex', gap: '8px', alignItems: 'center' }}>
-            <span style={{ color: S.dimmer, fontSize: '9px' }}>5 jobs activos</span>
+            <span style={{ color: S.dimmer, fontSize: '9px' }}>6 jobs activos</span>
             <button
               onClick={() => setEngineExpanded(x => !x)}
               style={{ ...retroBtn, fontSize: '9px', padding: '2px 10px' }}
@@ -487,12 +516,15 @@ REGRAS: checklist deve ser array vazio [] · insights máximo 3 · português de
           </div>
         </div>
         {/* jobs grid */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '1px', backgroundColor: S.border }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '1px', backgroundColor: S.border }}>
           {/* SHORTS */}
           <JobPill
             icon="🎬" name="AUTO-SHORTS"
-            stat="11 pendentes"
-            sub="intervalo · 2h"
+            stat={autoShStatus ? `${autoShStatus.pending ?? 0} pendentes` : '—'}
+            sub={autoShStatus ? `próx. ${fmtCountdown(autoShStatus.msUntilNext)}` : 'intervalo · 2h'}
+            running={autoShStatus?.running}
+            error={autoShStatus?.lastResult?.status === 'error'}
+            onRun={runShNow}
           />
           {/* COMMENTS */}
           <JobPill
@@ -530,6 +562,15 @@ REGRAS: checklist deve ser array vazio [] · insights máximo 3 · português de
             running={autoSeoStatus?.running}
             error={autoSeoStatus?.lastResult?.status === 'error'}
             onRun={runSeoNow}
+          />
+          {/* TIKTOK */}
+          <JobPill
+            icon="🎵" name="AUTO-TIKTOK"
+            stat={autoTtStatus ? `${autoTtStatus.posted ?? 0} postados · ${autoTtStatus.pending ?? 0} pend.` : '—'}
+            sub={autoTtStatus ? `próx. ${fmtCountdown(autoTtStatus.msUntilNext)}` : 'intervalo · 4h'}
+            running={autoTtStatus?.running}
+            error={autoTtStatus?.lastResult?.status === 'error'}
+            onRun={(autoTtStatus?.clipsQueued > 0 || autoTtStatus?.pendingVideos > 0) ? runTtNow : undefined}
           />
         </div>
         {/* first-hour burst note */}
@@ -647,6 +688,288 @@ REGRAS: checklist deve ser array vazio [] · insights máximo 3 · português de
               )}
             </div>
 
+            {/* TIKTOK */}
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                <p style={{ ...label, margin: 0, color: '#ff0050' }}>🎵 AUTO-TIKTOK</p>
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  {ttUser && (
+                    <a href={`https://www.tiktok.com/@${ttUser}`} target="_blank" rel="noopener noreferrer"
+                      style={{ color: '#660033', fontSize: '9px', border: '1px solid #330020', padding: '2px 8px', textDecoration: 'none', fontFamily: S.mono, letterSpacing: '0.5px' }}
+                      onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = '#ff0050'; (e.currentTarget as HTMLElement).style.borderColor = '#660033' }}
+                      onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = '#660033'; (e.currentTarget as HTMLElement).style.borderColor = '#330020' }}>
+                      @{ttUser} ↗
+                    </a>
+                  )}
+                  <a href="https://www.tiktok.com/tiktokstudio/content" target="_blank" rel="noopener noreferrer"
+                    style={{ color: '#ff0050', fontSize: '9px', border: '1px solid #44001a', padding: '2px 8px', textDecoration: 'none', fontFamily: S.mono, letterSpacing: '0.5px', backgroundColor: '#100508' }}
+                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = '#ff0050' }}
+                    onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = '#44001a' }}>
+                    STUDIO ↗
+                  </a>
+                </div>
+              </div>
+
+              {/* stats row */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '4px', marginBottom: '8px' }}>
+                {[
+                  { lbl: 'POSTADOS',  val: autoTtStatus?.posted       ?? '—' },
+                  { lbl: 'CLIPS',     val: autoTtStatus?.clipsQueued  ?? '—' },
+                  { lbl: 'VÍDEOS',    val: autoTtStatus?.pendingVideos ?? '—' },
+                  { lbl: 'FALHOS',    val: autoTtStatus?.failed        ?? '—' },
+                ].map(({ lbl: l, val }) => (
+                  <div key={l} style={{ backgroundColor: S.bgDeep, border: `1px solid ${S.border}`, padding: '5px 4px', textAlign: 'center' }}>
+                    <p style={{ ...label, margin: '0 0 2px', fontSize: '8px' }}>{l}</p>
+                    <p style={{ color: S.text, fontSize: '13px', margin: 0, fontWeight: 'bold' }}>{val}</p>
+                  </div>
+                ))}
+              </div>
+
+              {/* reset buttons */}
+              <div style={{ display: 'flex', gap: '4px', marginBottom: '8px' }}>
+                {[
+                  { label: 'RESET ERROS',    endpoint: '/api/tiktok/auto-reset-failed', color: '#553300' },
+                  { label: 'RESET POSTADOS', endpoint: '/api/tiktok/auto-reset-posted', color: '#334400' },
+                  { label: 'RESET TUDO',     endpoint: '/api/tiktok/auto-reset-all',    color: '#550011' },
+                ].map(({ label: lbl, endpoint, color }) => (
+                  <button key={lbl}
+                    onClick={() => {
+                      fetch(endpoint, { method: 'POST' })
+                        .then(() => fetch('/api/tiktok/auto-status').then(r => r.json()).then(setAutoTtStatus))
+                        .catch(() => {})
+                      toast(lbl + ' feito')
+                    }}
+                    style={{
+                      flex: 1, padding: '4px 2px', fontFamily: S.mono, fontSize: '8px', letterSpacing: '0.5px',
+                      cursor: 'pointer', background: 'transparent', color,
+                      border: `1px solid ${color}22`,
+                    }}
+                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = color; (e.currentTarget as HTMLElement).style.color = S.text }}
+                    onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = `${color}22`; (e.currentTarget as HTMLElement).style.color = color }}
+                  >{lbl}</button>
+                ))}
+              </div>
+
+              {/* post mode selector + run button */}
+              <div style={{ marginBottom: '10px' }}>
+                <p style={{ ...label, margin: '0 0 5px', color: S.dimmer }}>MODO · PRÓXIMO POST</p>
+                <div style={{ display: 'flex', gap: '4px', marginBottom: '6px' }}>
+                  {(['immediate', 'scheduled', 'draft'] as const).map(m => {
+                    const lbl = { immediate: 'IMEDIATO', scheduled: 'AGENDADO', draft: 'RASCUNHO' }
+                    const active = ttRunMode === m
+                    return (
+                      <button key={m} onClick={() => setTtRunMode(m)}
+                        style={{
+                          flex: 1, padding: '4px 2px', fontFamily: S.mono, fontSize: '9px', letterSpacing: '0.5px',
+                          cursor: 'pointer', background: active ? '#150008' : 'transparent',
+                          color: active ? '#ff0050' : S.dimmer,
+                          border: `1px solid ${active ? '#550020' : '#1a000a'}`,
+                        }}
+                        onMouseEnter={e => { if (!active) (e.currentTarget as HTMLElement).style.color = S.muted }}
+                        onMouseLeave={e => { if (!active) (e.currentTarget as HTMLElement).style.color = S.dimmer }}
+                      >{lbl[m]}</button>
+                    )
+                  })}
+                </div>
+                {ttRunMode === 'scheduled' && (
+                  <input
+                    type="datetime-local"
+                    value={ttRunSched}
+                    onChange={e => setTtRunSched(e.target.value)}
+                    min={new Date(Date.now() + 15 * 60 * 1000).toISOString().slice(0, 16)}
+                    max={new Date(Date.now() + 10 * 24 * 3600 * 1000).toISOString().slice(0, 16)}
+                    style={{
+                      width: '100%', boxSizing: 'border-box', marginBottom: '6px',
+                      background: '#080808', border: '1px solid #330015',
+                      color: '#ff0050', fontFamily: S.mono, fontSize: '10px', padding: '5px 8px', outline: 'none',
+                    }}
+                  />
+                )}
+                <button
+                  onClick={runTtNow}
+                  disabled={autoTtStatus?.running || (!autoTtStatus?.clipsQueued && !autoTtStatus?.pendingVideos)}
+                  style={{
+                    width: '100%', padding: '5px', fontFamily: S.mono, fontSize: '10px', letterSpacing: '1px',
+                    cursor: (autoTtStatus?.running || (!autoTtStatus?.clipsQueued && !autoTtStatus?.pendingVideos)) ? 'not-allowed' : 'pointer',
+                    background: (autoTtStatus?.running || (!autoTtStatus?.clipsQueued && !autoTtStatus?.pendingVideos)) ? 'transparent' : '#150008',
+                    color: (autoTtStatus?.running || (!autoTtStatus?.clipsQueued && !autoTtStatus?.pendingVideos)) ? S.dimmer : '#ff0050',
+                    border: `1px solid ${(autoTtStatus?.running || (!autoTtStatus?.clipsQueued && !autoTtStatus?.pendingVideos)) ? '#1a000a' : '#550020'}`,
+                  }}
+                  onMouseEnter={e => { if (!autoTtStatus?.running && autoTtStatus?.pending) (e.currentTarget as HTMLElement).style.borderColor = '#ff0050' }}
+                  onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = '#550020' }}
+                >
+                  {autoTtStatus?.running ? '[ A PROCESSAR... ]' : `[ POSTAR AGORA · ${ttRunMode === 'draft' ? 'RASCUNHO' : ttRunMode === 'scheduled' ? 'AGENDADO' : 'IMEDIATO'} ]`}
+                </button>
+              </div>
+
+              {/* last result */}
+              {autoTtStatus?.lastResult?.status === 'running' && (
+                <p style={{ color: S.yellow, fontSize: '10px', margin: '0 0 6px' }} className="blink">⟳ a processar...</p>
+              )}
+              {autoTtStatus?.lastResult?.status === 'done' && (
+                <p style={{ color: S.greenD, fontSize: '10px', margin: '0 0 6px' }}>
+                  ✓ último: {autoTtStatus.lastResult.title}
+                </p>
+              )}
+              {autoTtStatus?.lastResult?.status === 'error' && (
+                <p style={{ color: S.red, fontSize: '10px', margin: '0 0 6px' }}>⚠ {autoTtStatus.lastResult.error}</p>
+              )}
+
+              {/* AI caption of last post */}
+              {(autoTtStatus?.lastDescription || autoTtStatus?.lastResult?.description) && (
+                <div style={{ backgroundColor: '#060606', border: '1px solid #330020', padding: '8px 10px', marginBottom: '8px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '5px' }}>
+                    <span style={{ color: '#660033', fontSize: '9px', letterSpacing: '1px' }}>CAPTION IA · PRONTA PARA COPIAR</span>
+                    <CopyBtn text={autoTtStatus.lastDescription || autoTtStatus.lastResult.description} />
+                  </div>
+                  <p style={{ color: S.textM, fontSize: '10px', margin: 0, lineHeight: 1.6, whiteSpace: 'pre-wrap', fontStyle: 'italic' }}>
+                    {autoTtStatus.lastDescription || autoTtStatus.lastResult.description}
+                  </p>
+                </div>
+              )}
+
+              {/* clips queued */}
+              {autoTtStatus?.clips?.length > 0 && (
+                <div style={{ marginBottom: '8px' }}>
+                  <p style={{ ...label, margin: '0 0 5px', color: S.dimmer }}>CLIPS · fila de posts</p>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                    {autoTtStatus.clips.map((c: any, i: number) => (
+                      <div key={`${c.id}-${c.startTime}`} style={{ display: 'flex', gap: '6px', alignItems: 'center', padding: '3px 6px', backgroundColor: S.bgDeep }}>
+                        <span style={{ color: i === 0 ? '#ff0050' : S.dimmer, fontSize: '9px', flexShrink: 0 }}>{i === 0 ? '▶' : `${i + 1}.`}</span>
+                        <span style={{ color: S.muted, fontSize: '9px', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.title}</span>
+                        <span style={{ color: S.dimmer, fontSize: '8px', flexShrink: 0 }}>clip {c.clip} · {c.startTime}s</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {/* next videos pending extraction */}
+              {autoTtStatus?.queue?.length > 0 && (
+                <div style={{ marginBottom: '8px' }}>
+                  <p style={{ ...label, margin: '0 0 5px', color: S.dimmer }}>VÍDEOS · para extrair</p>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                    {autoTtStatus.queue.slice(0, 3).map((q: any, i: number) => (
+                      <div key={q.id} style={{ display: 'flex', gap: '8px', alignItems: 'center', padding: '3px 6px', backgroundColor: S.bgDeep }}>
+                        <span style={{ color: S.dimmer, fontSize: '9px', flexShrink: 0 }}>{i + 1}.</span>
+                        <span style={{ color: S.muted, fontSize: '9px', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{q.title}</span>
+                        <a href={q.url} target="_blank" rel="noopener noreferrer"
+                          style={{ color: '#2a4a6a', fontSize: '9px', textDecoration: 'none', flexShrink: 0 }}
+                          onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = S.blue }}
+                          onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = '#2a4a6a' }}>YT ↗</a>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* TikTok auto-replies */}
+              <div style={{ borderTop: `1px solid #1a0010`, padding: '8px 0' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                  <div>
+                    <span style={{ ...label, color: '#003322' }}>AUTO-REPLIES · TIKTOK</span>
+                    <span style={{ color: S.dimmer, fontSize: '9px', marginLeft: '8px' }}>
+                      {ttRepStatus ? `${ttRepStatus.todayReplied ?? 0} hoje · ${ttRepStatus.totalReplied ?? 0} total` : '—'}
+                    </span>
+                  </div>
+                  <button
+                    onClick={runTtRepliesNow}
+                    disabled={ttRepStatus?.running}
+                    style={{ ...retroBtn, fontSize: '9px', padding: '2px 8px', opacity: ttRepStatus?.running ? 0.5 : 1, borderColor: '#002a1a', color: ttRepStatus?.running ? S.dimmer : '#00cc66' }}
+                    onMouseEnter={e => { if (!ttRepStatus?.running) (e.currentTarget as HTMLElement).style.borderColor = '#00cc66' }}
+                    onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = '#002a1a' }}
+                  >
+                    {ttRepStatus?.running ? '[ ... ]' : '[ RUN ]'}
+                  </button>
+                </div>
+                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '4px' }}>
+                  <span style={{ color: S.dimmer, fontSize: '9px' }}>
+                    {ttRepStatus?.schedule ?? '03:00 · 09:00 · 15:00 · 21:00 UTC'}
+                  </span>
+                  {ttRepStatus?.nextRunAt && (
+                    <span style={{ color: S.dimmer, fontSize: '9px' }}>
+                      · próx. {fmtCountdown(ttRepStatus.msUntilNext)}
+                    </span>
+                  )}
+                </div>
+                {ttRepStatus?.lastResult?.status === 'running' && (
+                  <p style={{ color: S.yellow, fontSize: '9px', margin: '4px 0 0' }} className="blink">⟳ a responder...</p>
+                )}
+                {ttRepStatus?.lastResult?.status === 'done' && ttRepStatus.lastResult.replied > 0 && (
+                  <p style={{ color: S.greenD, fontSize: '9px', margin: '4px 0 0' }}>
+                    ✓ {ttRepStatus.lastResult.replied}/{ttRepStatus.lastResult.total} respondidos
+                  </p>
+                )}
+                {ttRepStatus?.lastResult?.status === 'done' && ttRepStatus.lastResult.replied === 0 && (
+                  <p style={{ color: S.dimmer, fontSize: '9px', margin: '4px 0 0' }}>
+                    {ttRepStatus.lastResult.message || 'Sem comentários novos'}
+                  </p>
+                )}
+                {ttRepStatus?.lastResult?.status === 'error' && (
+                  <p style={{ color: S.red, fontSize: '9px', margin: '4px 0 0' }}>⚠ {ttRepStatus.lastResult.error}</p>
+                )}
+              </div>
+
+              {/* TikTok video manager — list + delete */}
+              <div style={{ borderTop: `1px solid #1a0010`, paddingTop: '8px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                  <p style={{ ...label, margin: 0, color: '#440022' }}>VÍDEOS NO TIKTOK</p>
+                  <button
+                    onClick={loadTtVideos}
+                    disabled={ttVidsLoading}
+                    style={{ ...retroBtn, fontSize: '9px', padding: '2px 8px', opacity: ttVidsLoading ? 0.5 : 1, borderColor: '#330020', color: ttVidsLoading ? S.dimmer : '#ff0050' }}
+                    onMouseEnter={e => { if (!ttVidsLoading) (e.currentTarget as HTMLElement).style.borderColor = '#ff0050' }}
+                    onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = '#330020' }}
+                  >
+                    {ttVidsLoading ? '[ ... ]' : '[ CARREGAR ]'}
+                  </button>
+                </div>
+                {ttVideos === null && (
+                  <p style={{ color: S.dimmer, fontSize: '9px', margin: 0 }}>Clica em CARREGAR para ver os teus vídeos no TikTok.</p>
+                )}
+                {ttVideos?.length === 0 && (
+                  <p style={{ color: S.dimmer, fontSize: '9px', margin: 0 }}>Nenhum vídeo publicado no TikTok.</p>
+                )}
+                {ttVideos && ttVideos.length > 0 && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    {ttVideos.map((v: any) => (
+                      <div key={v.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '5px 8px', backgroundColor: S.bgDeep, border: `1px solid #1a000e` }}>
+                        {v.cover_image_url && (
+                          <img src={v.cover_image_url} alt="" style={{ width: 36, height: 64, objectFit: 'cover', flexShrink: 0, border: '1px solid #220011' }} />
+                        )}
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <p style={{ color: S.text, fontSize: '10px', margin: '0 0 2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {v.title || '(sem título)'}
+                          </p>
+                          <p style={{ color: S.dimmer, fontSize: '9px', margin: 0 }}>
+                            {v.create_time ? new Date(v.create_time * 1000).toLocaleDateString('pt-BR') : '—'}
+                          </p>
+                        </div>
+                        <div style={{ display: 'flex', gap: '5px', flexShrink: 0 }}>
+                          {v.share_url && (
+                            <a href={v.share_url} target="_blank" rel="noopener noreferrer"
+                              style={{ color: '#440033', fontSize: '9px', border: '1px solid #330022', padding: '2px 6px', textDecoration: 'none', fontFamily: S.mono }}
+                              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = '#ff0050' }}
+                              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = '#440033' }}>
+                              ↗
+                            </a>
+                          )}
+                          <button
+                            onClick={() => deleteTtVideo(v.id)}
+                            disabled={ttDeleting === v.id}
+                            style={{ background: 'transparent', border: '1px solid #2a0000', color: ttDeleting === v.id ? S.dimmer : '#551111', fontSize: '9px', padding: '2px 6px', cursor: ttDeleting === v.id ? 'wait' : 'pointer', fontFamily: S.mono }}
+                            onMouseEnter={e => { if (ttDeleting !== v.id) { (e.currentTarget as HTMLElement).style.color = '#ff4400'; (e.currentTarget as HTMLElement).style.borderColor = '#550000' } }}
+                            onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = '#551111'; (e.currentTarget as HTMLElement).style.borderColor = '#2a0000' }}
+                          >
+                            {ttDeleting === v.id ? '...' : '[ DEL ]'}
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
           </div>
         )}
       </div>
@@ -728,8 +1051,8 @@ REGRAS: checklist deve ser array vazio [] · insights máximo 3 · português de
                   {daysSince !== null ? (
                     <>
                       <p style={{ color: uploadColor, fontSize: '28px', fontWeight: 'bold', margin: '0 0 4px', lineHeight: 1 }}>
-                        {daysSince}
-                        <span style={{ fontSize: '11px', fontWeight: 'normal', marginLeft: '6px', color: S.muted }}>dias atrás</span>
+                        {daysSince}{' '}
+                        <span style={{ fontSize: '11px', fontWeight: 'normal', color: S.muted }}>dias atrás</span>
                       </p>
                       <p style={{ color: S.dimmer, fontSize: '10px', margin: '0 0 10px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {lastVideo?.title?.slice(0, 48) ?? '—'}
@@ -796,9 +1119,15 @@ REGRAS: checklist deve ser array vazio [] · insights máximo 3 · português de
 
             <div style={panel}>
               <p style={{ ...label, marginBottom: '12px' }}>🎯 meta ypp</p>
-              <GoalBar label="SUBSCRIBERS" current={plan.weeklyGoal.subsProgress} target={plan.weeklyGoal.subsTarget} fmt={n => n.toLocaleString()} />
+              <GoalBar label="SUBSCRIBERS"
+                current={channelInfo?.subscribers ?? 0}
+                target={1000}
+                fmt={n => n.toLocaleString()} />
               <div style={{ height: '10px' }} />
-              <GoalBar label="WATCH TIME" current={plan.weeklyGoal.watchMinutes} target={plan.weeklyGoal.watchTarget} fmt={n => `${Math.round(n / 60).toLocaleString()}h`} />
+              <GoalBar label="WATCH TIME"
+                current={Math.round((analyticsData ?? []).reduce((s, r) => s + r.watchTime, 0))}
+                target={240000}
+                fmt={n => `${Math.round(n / 60).toLocaleString()}h`} />
               <p style={{ color: '#2a2a2a', fontSize: '9px', margin: '10px 0 0', letterSpacing: '1px' }}>1.000 SUBS + 4.000H</p>
             </div>
 
@@ -807,175 +1136,8 @@ REGRAS: checklist deve ser array vazio [] · insights máximo 3 · português de
       )}
 
       {/* ═══════════════════════════════════════════════════════════════
-          ENGAGEMENT + REPLIES — 2 colunas
+          AUTO-REPLIES
       ═══════════════════════════════════════════════════════════════ */}
-      <div style={{ display: 'grid', gridTemplateColumns: '3fr 2fr', gap: '12px', alignItems: 'start' }}>
-
-        {/* ── FILA DE ENGAJAMENTO ────────────────────────────── */}
-        <div style={panel}>
-          {/* header */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-            <div>
-              <p style={{ ...label, margin: '0 0 5px' }}>💬 fila de engajamento · vídeos em alta</p>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ color: engDoneCount >= 5 ? S.green : S.text, fontSize: '12px', fontWeight: 'bold' }}>
-                  {engDoneCount}/5
-                </span>
-                <div style={{ fontSize: '10px', letterSpacing: '-1px' }}>
-                  <span style={{ color: engDoneCount >= 5 ? S.green : S.greenD }}>{'█'.repeat(engDoneCount)}</span>
-                  <span style={{ color: S.border }}>{'░'.repeat(Math.max(0, 5 - engDoneCount))}</span>
-                </div>
-                <span style={{ color: S.muted, fontSize: '9px' }}>comentários feitos</span>
-              </div>
-            </div>
-            <button
-              onClick={() => fetchEngagement(true)}
-              disabled={engLoading}
-              style={{ ...retroBtn, opacity: engLoading ? 0.4 : 1 }}
-              onMouseEnter={e => { if (!engLoading) { (e.currentTarget as HTMLElement).style.borderColor = S.greenD; (e.currentTarget as HTMLElement).style.color = S.greenD } }}
-              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = S.borderA; (e.currentTarget as HTMLElement).style.color = S.muted }}
-            >
-              {engLoading ? '[ A GERAR... ]' : '[ 5 NOVOS ]'}
-            </button>
-          </div>
-
-          {/* auto-job mini status */}
-          {autoComStatus && (
-            <div style={{ padding: '6px 10px', backgroundColor: '#050505', border: `1px solid #1a2a1a`, marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-              <span style={{ color: '#2a4a2a', fontSize: '9px', letterSpacing: '1px' }}>● JOB · 4×/DIA</span>
-              <span style={{ color: autoComStatus.running ? S.yellow : S.greenD, fontSize: '10px' }}>
-                {autoComStatus.running ? <span className="blink">a comentar...</span> : `✓ ${autoComStatus.todayPosted ?? 0} hoje · ${autoComStatus.totalPosted ?? 0} total`}
-              </span>
-              {!autoComStatus.running && (
-                <span style={{ color: S.dimmer, fontSize: '9px' }}>próx. {fmtCountdown(autoComStatus.msUntilNext)}</span>
-              )}
-              <div style={{ marginLeft: 'auto', display: 'flex', gap: '6px' }}>
-                {(autoComStatus.todayEntries?.length > 0) && (
-                  <button onClick={() => setComExpanded(x => !x)}
-                    style={{ ...retroBtn, fontSize: '9px', padding: '2px 8px' }}
-                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = '#888' }}
-                    onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = S.muted }}>
-                    {comExpanded ? '▲' : '▼'}
-                  </button>
-                )}
-                <button onClick={runComNow} disabled={autoComStatus.running}
-                  style={{ ...retroBtn, fontSize: '9px', padding: '2px 8px', opacity: autoComStatus.running ? 0.4 : 1 }}
-                  onMouseEnter={e => { if (!autoComStatus.running) { (e.currentTarget as HTMLElement).style.borderColor = S.greenD; (e.currentTarget as HTMLElement).style.color = S.greenD } }}
-                  onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = S.borderA; (e.currentTarget as HTMLElement).style.color = S.muted }}>
-                  [ RUN ]
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* expanded job entries */}
-          {comExpanded && autoComStatus?.todayEntries?.length > 0 && (
-            <div style={{ backgroundColor: '#050505', border: `1px solid #111`, padding: '8px', marginBottom: '10px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-              {autoComStatus.todayEntries.map((e: any) => {
-                const link = e.commentId
-                  ? `https://www.youtube.com/watch?v=${e.videoId}&lc=${e.commentId}`
-                  : `https://www.youtube.com/watch?v=${e.videoId}`
-                return (
-                  <div key={e.videoId} style={{ display: 'flex', gap: '8px', alignItems: 'baseline' }}>
-                    <span style={{ color: S.greenD, fontSize: '9px', flexShrink: 0 }}>✓</span>
-                    <span style={{ color: S.muted, fontSize: '9px', flexShrink: 0 }}>{e.artist}</span>
-                    <span style={{ color: S.dimmer, fontSize: '9px', fontStyle: 'italic', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>"{e.comment}"</span>
-                    <a href={link} target="_blank" rel="noopener noreferrer"
-                      style={{ color: '#2a4a6a', fontSize: '9px', textDecoration: 'none', flexShrink: 0 }}
-                      onMouseEnter={e2 => { (e2.currentTarget as HTMLElement).style.color = S.blue }}
-                      onMouseLeave={e2 => { (e2.currentTarget as HTMLElement).style.color = '#2a4a6a' }}>
-                      ↗
-                    </a>
-                  </div>
-                )
-              })}
-            </div>
-          )}
-
-          {/* loading state */}
-          {engLoading && !engagement && (
-            <div style={{ textAlign: 'center', padding: '20px' }}>
-              <p style={{ color: S.dimmer, fontSize: '11px', margin: 0 }}>{'█'.repeat(10)}<span className="blink">█</span></p>
-              <p style={{ color: '#2a2a2a', fontSize: '10px', margin: '8px 0 0', letterSpacing: '1px' }}>LAIS a selecionar vídeos via trending...</p>
-            </div>
-          )}
-
-          {/* error */}
-          {engError && !engLoading && (
-            <div style={{ padding: '8px 10px', backgroundColor: '#0a0000', border: `1px solid #330000`, marginBottom: '8px' }}>
-              <p style={{ color: S.red, fontSize: '10px', margin: 0 }}>ERRO: {engError}</p>
-            </div>
-          )}
-
-          {/* empty state */}
-          {!engagement && !engLoading && (
-            <div style={{ padding: '16px', backgroundColor: S.bgDeep, border: `1px solid ${S.border}`, textAlign: 'center' }}>
-              <p style={{ color: S.dimmer, fontSize: '11px', margin: '0 0 8px' }}>Sem vídeos — clica para gerar via trending.</p>
-              <button onClick={() => fetchEngagement(false)} style={retroBtn}
-                onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = S.greenD; (e.currentTarget as HTMLElement).style.color = S.greenD }}
-                onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = S.borderA; (e.currentTarget as HTMLElement).style.color = S.muted }}>
-                [ GERAR FILA ]
-              </button>
-            </div>
-          )}
-
-          {/* items */}
-          {engagement && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              {engagement.map((item, idx) => {
-                const jobDone    = jobPostedIds.has(item.videoId)
-                const manualDone = !!engDone[item.videoId]
-                const done       = manualDone || jobDone
-                return (
-                  <div key={item.videoId} style={{ padding: '10px 12px', backgroundColor: done ? '#0a1a0a' : S.bgDeep, border: `1px solid ${done ? '#1a3a1a' : S.border}`, opacity: done ? 0.5 : 1, transition: 'all 0.2s' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
-                      <span style={{ color: S.muted, fontSize: '10px', flexShrink: 0 }}>{idx + 1}.</span>
-                      <p style={{ color: done ? S.dimmer : S.text, fontSize: '11px', margin: 0, textDecoration: done ? 'line-through' : 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
-                        {item.title}
-                      </p>
-                      {jobDone && <span style={{ color: '#1a4a1a', fontSize: '9px', border: `1px solid #1a3a1a`, padding: '1px 5px', flexShrink: 0 }}>JOB ✓</span>}
-                    </div>
-                    <p style={{ color: S.muted, fontSize: '10px', margin: '0 0 6px' }}>
-                      <span style={{ color: S.greenD }}>{item.artist}</span>{item.channel ? ` · ${item.channel}` : ''}
-                    </p>
-                    {item.comment && (
-                      <div style={{ backgroundColor: '#050505', border: `1px solid #1a2030`, padding: '7px 10px', marginBottom: '7px', display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'flex-start' }}>
-                        <p style={{ color: S.textM, fontSize: '11px', margin: 0, lineHeight: 1.5, fontStyle: 'italic', flex: 1 }}>
-                          "{item.comment}"
-                        </p>
-                        <CopyBtn text={item.comment} />
-                      </div>
-                    )}
-                    <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                      <a href={`https://www.youtube.com/watch?v=${item.videoId}`} target="_blank" rel="noopener noreferrer"
-                        style={{ background: 'transparent', border: `1px solid #1a2030`, color: S.blue, fontSize: '9px', padding: '3px 8px', fontFamily: S.mono, textDecoration: 'none', flexShrink: 0 }}
-                        onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = '#88bbdd' }}
-                        onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = S.blue }}>
-                        [ VER VÍDEO ]
-                      </a>
-                      {jobDone ? (
-                        <span style={{ color: '#1a4a1a', fontSize: '9px', padding: '3px 8px', border: `1px solid #1a3a1a` }}>
-                          ✓ JOB POSTOU
-                        </span>
-                      ) : (
-                        <button
-                          onClick={() => toggleEngDone(item.videoId)}
-                          style={{ background: manualDone ? '#0a1a0a' : 'transparent', border: `1px solid ${manualDone ? S.green : S.border}`, color: manualDone ? S.green : S.dimmer, fontSize: '9px', padding: '3px 8px', cursor: 'pointer', fontFamily: S.mono, flexShrink: 0 }}
-                          onMouseEnter={e => { if (!manualDone) { (e.currentTarget as HTMLElement).style.borderColor = S.greenD; (e.currentTarget as HTMLElement).style.color = S.greenD } }}
-                          onMouseLeave={e => { if (!manualDone) { (e.currentTarget as HTMLElement).style.borderColor = S.border; (e.currentTarget as HTMLElement).style.color = S.dimmer } }}
-                        >
-                          {manualDone ? '✓ FEITO' : '[ MARCAR FEITO ]'}
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          )}
-        </div>
-
-        {/* ── AUTO-REPLIES ───────────────────────────────────── */}
         <div style={panel}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
             <div>
@@ -1057,7 +1219,65 @@ REGRAS: checklist deve ser array vazio [] · insights máximo 3 · português de
           )}
         </div>
 
-      </div>
+      {/* ═══════════════════════════════════════════════════════════════
+          QUOTA STATUS
+      ═══════════════════════════════════════════════════════════════ */}
+        <div style={panel}>
+          <p style={{ ...label, marginBottom: '12px' }}>📊 quota youtube · tempo real</p>
+          {acctStatus?.quota ? (() => {
+            const q   = acctStatus.quota
+            const exhausted = !!(q as any).ytExhausted
+            const ytP = exhausted ? 100 : Math.min(100, Math.round((q.ytUnits / q.ytLimit) * 100))
+            const yaP = Math.min(100, Math.round((q.yaUnits / q.yaLimit) * 100))
+            const barColor = (p: number) => p >= 80 ? S.red : p >= 50 ? S.yellow : S.greenD
+            const resetIn = Math.max(0, new Date(q.resetAt).getTime() - Date.now())
+            const hh = Math.floor(resetIn / 3600000)
+            const mm = Math.floor((resetIn % 3600000) / 60000)
+            return (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                {/* YouTube Data API bar */}
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                    <span style={{ color: S.muted, fontSize: '10px', letterSpacing: '1px' }}>DATA API v3</span>
+                    <span style={{ color: exhausted ? S.red : barColor(ytP), fontSize: '10px', fontFamily: S.mono }}>
+                      {exhausted ? 'ESGOTADA' : `${q.ytUnits.toLocaleString()} / ${q.ytLimit.toLocaleString()} units`}
+                    </span>
+                  </div>
+                  <div style={{ height: '6px', backgroundColor: S.bgDeep, border: `1px solid ${S.border}` }}>
+                    <div style={{ height: '100%', width: `${ytP}%`, backgroundColor: exhausted ? S.red : barColor(ytP), transition: 'width 0.4s ease' }} />
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '2px' }}>
+                    <span style={{ color: S.dimmer, fontSize: '9px' }}>{exhausted ? '' : `${ytP}% usado`}</span>
+                  </div>
+                </div>
+                {/* YouTube Analytics API bar */}
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                    <span style={{ color: S.muted, fontSize: '10px', letterSpacing: '1px' }}>ANALYTICS API</span>
+                    <span style={{ color: barColor(yaP), fontSize: '10px', fontFamily: S.mono }}>
+                      {q.yaUnits.toLocaleString()} / {q.yaLimit.toLocaleString()} units
+                    </span>
+                  </div>
+                  <div style={{ height: '6px', backgroundColor: S.bgDeep, border: `1px solid ${S.border}` }}>
+                    <div style={{ height: '100%', width: `${yaP}%`, backgroundColor: barColor(yaP), transition: 'width 0.4s ease' }} />
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '2px' }}>
+                    <span style={{ color: S.dimmer, fontSize: '9px' }}>{yaP}% usado</span>
+                  </div>
+                </div>
+                {/* Reset countdown */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '4px', borderTop: `1px solid ${exhausted ? S.red : S.border}` }}>
+                  <span style={{ color: exhausted ? S.red : S.dimmer, fontSize: '9px', letterSpacing: '1px' }}>reset em</span>
+                  <span style={{ color: exhausted ? S.red : S.muted, fontSize: '10px', fontFamily: S.mono }}>
+                    {hh}h {mm.toString().padStart(2, '0')}m
+                  </span>
+                </div>
+              </div>
+            )
+          })() : (
+            <p style={{ color: S.dimmer, fontSize: '10px', margin: 0 }}>A carregar...</p>
+          )}
+        </div>
 
     </div>
   )

@@ -538,3 +538,30 @@ export function IconMarket({ size = 20 }: { size?: number }) {
     </svg>
   )
 }
+
+export function IconCalendar({ size = 20 }: { size?: number }) {
+  const c = { style: { imageRendering: 'pixelated' as const }, viewBox: '0 0 20 20', fill: 'none' }
+  return (
+    <svg {...c} width={size} height={size}>
+      {/* Calendar body */}
+      <rect x="1" y="3" width="18" height="15" fill="currentColor" opacity="0.15"/>
+      <rect x="1" y="3" width="18" height="1"  fill="currentColor" opacity="0.8"/>
+      <rect x="1" y="3" width="1"  height="15" fill="currentColor" opacity="0.6"/>
+      <rect x="18" y="3" width="1" height="15" fill="currentColor" opacity="0.6"/>
+      <rect x="1" y="17" width="18" height="1" fill="currentColor" opacity="0.6"/>
+      {/* Header bar */}
+      <rect x="1" y="3" width="18" height="4"  fill="currentColor" opacity="0.5"/>
+      {/* Ring pins */}
+      <rect x="5"  y="1" width="2" height="4" fill="currentColor"/>
+      <rect x="13" y="1" width="2" height="4" fill="currentColor"/>
+      {/* Grid dots — 3 rows × 5 cols */}
+      {[7,10,13].map(row =>
+        [3,6,9,12,15].map(col => (
+          <rect key={`${row}-${col}`} x={col} y={row} width="2" height="2" fill="currentColor" opacity="0.5"/>
+        ))
+      )}
+      {/* Highlight today cell */}
+      <rect x="3" y="13" width="2" height="2" fill="currentColor"/>
+    </svg>
+  )
+}

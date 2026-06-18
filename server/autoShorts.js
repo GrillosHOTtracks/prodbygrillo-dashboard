@@ -3,15 +3,18 @@ const path      = require('path')
 const { execFile } = require('child_process')
 const { google }   = require('googleapis')
 
-const DATA_FILE  = path.join(__dirname, 'data/uploads.json')
-const TMP_DIR    = path.join(__dirname, 'tmp')
+const DATA_FILE   = path.join(__dirname, 'data/uploads.json')
+const STATE_FILE  = path.join(__dirname, 'data/shorts-state.json')
+const TMP_DIR     = path.join(__dirname, 'tmp')
 const YTDLP      = 'C:\\Users\\Prodbygrillo\\AppData\\Local\\Microsoft\\WinGet\\Packages\\yt-dlp.yt-dlp_Microsoft.Winget.Source_8wekyb3d8bbwe\\yt-dlp.exe'
-const INTERVAL_MS = 2 * 60 * 60 * 1000  // 2 hours
+const TICK_MS = 10 * 60 * 1000  // check every 10 minutes
 
 fs.mkdirSync(TMP_DIR, { recursive: true })
 
-function readHistory()     { try { return JSON.parse(fs.readFileSync(DATA_FILE, 'utf-8')) } catch { return [] } }
+function readHistory()      { try { return JSON.parse(fs.readFileSync(DATA_FILE, 'utf-8')) } catch { return [] } }
 function writeHistory(arr) { fs.writeFileSync(DATA_FILE, JSON.stringify(arr, null, 2)) }
+function readState()       { try { return JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8')) } catch { return {} } }
+function writeState(s)     { fs.writeFileSync(STATE_FILE, JSON.stringify(s, null, 2)) }
 
 function sanitizeTags(raw) {
   const arr = Array.isArray(raw) ? raw : String(raw || '').split(',')
@@ -25,6 +28,62 @@ function sanitizeTags(raw) {
   return result
 }
 
+// Extract artist names from a type beat title
+// e.g. '[FREE] Gunna Type Beat - "Dark Nights" | Hurricane Wisdom Type Beat'
+//   → ['Gunna', 'Hurricane Wisdom']
+function extractArtists(title) {
+  return title
+    .split('|')
+    .map(seg =>
+      seg
+        .replace(/\[.*?\]/g, '')          // remove [FREE], [FREE USE], etc.
+        .replace(/"[^"]*"/g, '')           // remove "Song Name"
+        .replace(/\btype\s*beat\b/gi, '')  // remove "type beat"
+        .replace(/[-–—]+/g, ' ')           // dashes → space
+        .replace(/[^a-zA-Z0-9\s']/g, ' ') // strip punctuation except apostrophes
+        .replace(/\s+/g, ' ')
+        .trim()
+    )
+    .filter(name => name.length > 0)
+}
+
+// Build description and tags for a Short based on its title
+function buildShortsDescription(title) {
+  const artists = extractArtists(title)
+
+  // Artist-specific hashtags come first (shown above title in Shorts UI)
+  const artistHashtags = artists.flatMap(a => {
+    const slug = a.toLowerCase().replace(/\s+/g, '')
+    return [`#${slug}typebeat`, `#${slug}`]
+  })
+
+  const evergreenHashtags = ['#typebeat', '#freebeat', '#trap', '#shorts', '#prodbygrillo', `#freebeat${new Date().getFullYear()}`]
+
+  const allHashtags = [...new Set([...artistHashtags, ...evergreenHashtags])]
+
+  const desc = [
+    title,
+    '',
+    '💰 https://www.beatstars.com/prodbygrillo',
+    '',
+    'prod. prodbygrillo',
+    '',
+    allHashtags.join(' '),
+  ].join('\n')
+
+  const tags = sanitizeTags([
+    'shorts',
+    'type beat',
+    'free type beat',
+    ...artists.map(a => `${a.toLowerCase()} type beat`),
+    ...artists.map(a => a.toLowerCase()),
+    'trap',
+    'prod by prodbygrillo',
+  ])
+
+  return { desc, tags }
+}
+
 function cutShort(inputPath, outputPath) {
   return new Promise((resolve, reject) => {
     execFile('ffmpeg', [
@@ -36,30 +95,62 @@ function cutShort(inputPath, outputPath) {
   })
 }
 
-// Find next video that needs a short (not itself a short, no matching short in history)
-function findPending() {
-  const history = readHistory()
-  const shortTitles = new Set(
-    history.filter(e => e.isShort).map(e => e.title.replace(/\s*#shorts\s*$/i, '').trim())
-  )
-  return history.filter(e => !e.isShort && e.status === 'live' && !shortTitles.has(e.title.trim()))
+const FIXED_HOURS  = [0, 3, 6, 12, 18, 21]  // fixed posting times (local time)
+const DAILY_LIMIT  = FIXED_HOURS.length
+
+// All eligible source videos (live, not a short themselves)
+function allEligible() {
+  return readHistory().filter(e => !e.isShort && e.status === 'live')
+}
+
+// Pick a random video using cycle rotation:
+// cycles through all eligible videos in random order, resets when all have been used
+function pickRandom() {
+  const eligible = allEligible()
+  if (!eligible.length) return null
+
+  const state    = readState()
+  let usedCycle  = Array.isArray(state.usedCycle) ? state.usedCycle : []
+
+  // Filter to videos not yet used in this cycle
+  let pool = eligible.filter(e => !usedCycle.includes(e.id))
+
+  if (!pool.length) {
+    // All videos used — reset cycle
+    console.log('[AUTO-SHORT] Cycle complete — resetting rotation')
+    usedCycle = []
+    pool = eligible
+  }
+
+  // Pick one at random from the pool
+  return pool[Math.floor(Math.random() * pool.length)]
 }
 
 // State
-let nextRunAt   = Date.now() + INTERVAL_MS
+let nextRunAt   = Date.now() + TICK_MS
 let lastResult  = null
 let running     = false
 let accountMgr  = null
 
+function shortsUploadedToday() {
+  const today = new Date().toISOString().slice(0, 10)
+  return readHistory().filter(e => e.isShort && e.uploadedAt?.startsWith(today)).length
+}
+
 async function processNext() {
   if (running || !accountMgr || !accountMgr.isAuthenticated()) return
-  const pending = findPending()
-  if (!pending.length) {
-    console.log('[AUTO-SHORT] No pending videos')
+
+  const todayCount = shortsUploadedToday()
+  if (todayCount >= DAILY_LIMIT) {
+    console.log(`[AUTO-SHORT] Daily limit reached (${DAILY_LIMIT}/day) — skipping`)
     return
   }
 
-  const entry = pending[0]
+  const entry = pickRandom()
+  if (!entry) {
+    console.log('[AUTO-SHORT] No eligible videos')
+    return
+  }
   running = true
   console.log('[AUTO-SHORT] Processing:', entry.id, entry.title)
   lastResult = { id: entry.id, title: entry.title, status: 'running', startedAt: new Date().toISOString() }
@@ -88,13 +179,13 @@ async function processNext() {
     console.log('[AUTO-SHORT] Uploading short for:', entry.id)
     const auth = accountMgr.getAuthClient()
     const yt   = google.youtube({ version: 'v3', auth })
-    const shortTitle = entry.title.replace(/#shorts/gi, '').trim() + ' #shorts'
-    const shortDesc  = `${entry.title}\n\n💰 https://www.beatstars.com/prodbygrillo\n\nprod. prodbygrillo\n\n#shorts`
+    const shortTitle             = entry.title.replace(/#shorts/gi, '').trim() + ' #shorts'
+    const { desc: shortDesc, tags: shortTags } = buildShortsDescription(entry.title)
 
     const shortRes = await yt.videos.insert({
       part: ['snippet', 'status'],
       requestBody: {
-        snippet: { title: shortTitle, description: shortDesc, tags: sanitizeTags(['shorts', 'type beat', 'free type beat']), categoryId: '10' },
+        snippet: { title: shortTitle, description: shortDesc, tags: shortTags, categoryId: '10' },
         status:  { privacyStatus: 'public', selfDeclaredMadeForKids: false },
       },
       media: { mimeType: 'video/mp4', body: fs.createReadStream(shortPath) },
@@ -114,38 +205,98 @@ async function processNext() {
     writeHistory(hist)
 
     lastResult = { id: entry.id, shortId: shortVideoId, title: shortTitle, status: 'done', finishedAt: new Date().toISOString() }
+
+    // Mark video as used in the current cycle
+    const st = readState()
+    const used = Array.isArray(st.usedCycle) ? st.usedCycle : []
+    if (!used.includes(entry.id)) used.push(entry.id)
+    writeState({ lastRunAt: new Date().toISOString(), usedCycle: used })
   } catch (err) {
     console.error('[AUTO-SHORT] Error:', err.message)
     lastResult = { id: entry.id, title: entry.title, status: 'error', error: err.message, finishedAt: new Date().toISOString() }
+    writeState({ ...readState(), lastRunAt: new Date().toISOString() })
   } finally {
     cleanup()
     running = false
   }
 }
 
+// Build today's schedule from fixed hours (local time).
+// Persisted in state so server restarts don't rebuild mid-day.
+function buildTodaySchedule() {
+  const today = new Date().toISOString().slice(0, 10)
+  const state = readState()
+  if (state.scheduleDate === today && Array.isArray(state.todaySchedule) && state.todaySchedule.length === DAILY_LIMIT) {
+    return state.todaySchedule
+  }
+  const times = FIXED_HOURS.map(h => {
+    const d = new Date()
+    d.setHours(h, 0, 0, 0)
+    return d.getTime()
+  })
+  writeState({ ...state, scheduleDate: today, todaySchedule: times })
+  console.log('[AUTO-SHORT] Daily schedule:', times.map(t => new Date(t).toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' })).join(' · '))
+  return times
+}
+
+function nextScheduledSlot() {
+  const schedule = buildTodaySchedule()
+  return schedule.find(t => t > Date.now()) ?? null
+}
+
 function start(mgr) {
   accountMgr = mgr
-  console.log('[AUTO-SHORT] Scheduler started — interval: 2h | pending:', findPending().length)
-  setInterval(async () => {
-    nextRunAt = Date.now() + INTERVAL_MS
-    await processNext()
-  }, INTERVAL_MS)
+  const eligible  = allEligible()
+  const state     = readState()
+  const usedCycle = Array.isArray(state.usedCycle) ? state.usedCycle : []
+  const schedule  = buildTodaySchedule()
+  console.log(`[AUTO-SHORT] Started — ${DAILY_LIMIT}/day random hours | eligible: ${eligible.length} | cycle: ${usedCycle.length}/${eligible.length} | today: ${schedule.map(t => new Date(t).toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' })).join(', ')}`)
+
+  async function tick() {
+    const schedule    = buildTodaySchedule()
+    const now         = Date.now()
+    const todayCount  = shortsUploadedToday()
+    const slotsPassed = schedule.filter(t => t <= now).length
+
+    if (todayCount < slotsPassed) {
+      await processNext()
+    }
+
+    // Wake up right after the next slot, or in TICK_MS if all slots passed
+    const next  = schedule.find(t => t > now)
+    const delay = next ? Math.max(60000, next - now + 5000) : TICK_MS
+    nextRunAt   = now + delay
+    setTimeout(tick, delay)
+  }
+
+  // First tick: start quickly so we don't miss a slot that's already passed today
+  nextRunAt = Date.now() + 60000
+  setTimeout(tick, 60000)
 }
 
 function getStatus() {
-  const pending = findPending()
+  const eligible  = allEligible()
+  const state     = readState()
+  const usedCycle = Array.isArray(state.usedCycle) ? state.usedCycle : []
+  const remaining = eligible.filter(e => !usedCycle.includes(e.id))
+  const schedule  = buildTodaySchedule()
   return {
     running,
-    pending:   pending.length,
-    nextRunAt: new Date(nextRunAt).toISOString(),
+    eligible:    eligible.length,
+    cycleUsed:   usedCycle.length,
+    cycleRemain: remaining.length,
+    todayCount:  shortsUploadedToday(),
+    dailyLimit:  DAILY_LIMIT,
+    todaySchedule: schedule.map(t => new Date(t).toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' })),
+    nextRunAt:   new Date(nextRunAt).toISOString(),
     msUntilNext: Math.max(0, nextRunAt - Date.now()),
     lastResult,
-    queue: pending.slice(0, 5).map(e => ({ id: e.id, title: e.title })),
+    nextUp: remaining.slice(0, 3).map(e => ({ id: e.id, title: e.title })),
   }
 }
 
 function runNow() {
-  nextRunAt = Date.now() + INTERVAL_MS
+  nextRunAt = Date.now() + TICK_MS
   return processNext()
 }
 

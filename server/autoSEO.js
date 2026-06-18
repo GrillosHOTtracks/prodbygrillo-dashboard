@@ -68,10 +68,10 @@ function ensureBeatStarsLink(desc) {
 }
 
 let running    = false
-let nextRunAt  = Date.now() + INTERVAL_MS
+let nextRunAt  = null  // set by start()
 let lastResult = null
 let accountMgr = null
-let baseUrl    = 'http://localhost:3011'
+let baseUrl    = 'http://localhost:3010'
 
 async function run() {
   if (running || !accountMgr?.isAuthenticated()) return
@@ -80,13 +80,13 @@ async function run() {
   lastResult = { status: 'running', startedAt: new Date().toISOString() }
 
   try {
-    const auth = accountMgr.getAuthClient()
-    const yt   = google.youtube({ version: 'v3', auth })
-
-    // 1. Get trending artists
+    // 1. Get trending artists (no quota)
     const tData   = await fetchJson(`${baseUrl}/api/trending`)
     const artists = (Array.isArray(tData) ? tData : []).map(a => a.name).filter(Boolean).slice(0, 8)
     console.log('[AUTO-SEO] Trending artists:', artists.join(', '))
+
+    const auth = accountMgr.getAuthClient()
+    const yt   = google.youtube({ version: 'v3', auth })
 
     // 2. Get all channel videos
     const chRes = await yt.channels.list({ part: ['contentDetails'], mine: true })
@@ -129,7 +129,6 @@ async function run() {
       const snip = snippets[v.videoId]
       if (!snip) continue
 
-      // Detect style from title
       const styleTags = { drill: 'Drill', phonk: 'Phonk', melodic: 'Melodic', afro: 'Afro', rnb: 'RnB' }
       let style = 'Trap'
       for (const [kw, st] of Object.entries(styleTags)) {
@@ -139,10 +138,8 @@ async function run() {
       const newTags = buildTags(snip.tags || [], artists, style)
       const newDesc = ensureBeatStarsLink(snip.description || '')
 
-      // Only update if something changed
       const tagsChanged = JSON.stringify(newTags) !== JSON.stringify(snip.tags || [])
       const descChanged = newDesc !== snip.description
-
       if (!tagsChanged && !descChanged) continue
 
       try {
@@ -150,12 +147,7 @@ async function run() {
           part: ['snippet'],
           requestBody: {
             id: v.videoId,
-            snippet: {
-              title:       snip.title,
-              description: newDesc,
-              tags:        newTags,
-              categoryId:  snip.categoryId || '10',
-            },
+            snippet: { title: snip.title, description: newDesc, tags: newTags, categoryId: snip.categoryId || '10' },
           },
         })
         updated++
@@ -167,7 +159,7 @@ async function run() {
     }
 
     const state = readState()
-    state.lastRun      = new Date().toISOString()
+    state.lastRun       = new Date().toISOString()
     state.videosUpdated = (state.videosUpdated || 0) + updated
     state.trendingUsed  = artists
     writeState(state)
@@ -186,22 +178,31 @@ function start(mgr, port) {
   accountMgr = mgr
   if (port) baseUrl = `http://localhost:${port}`
   const state = readState()
-  console.log('[AUTO-SEO] Started — last run:', state.lastRun || 'never', '| total updated:', state.videosUpdated || 0)
-  setInterval(async () => {
-    nextRunAt = Date.now() + INTERVAL_MS
+  // Schedule next auto-run based on last run time
+  // Se nunca correu, agenda para INTERVAL_MS a partir de agora (não de epoch 0)
+  const lastRunTs = state.lastRun ? new Date(state.lastRun).getTime() : Date.now()
+  nextRunAt = lastRunTs + INTERVAL_MS
+  const msUntil = Math.max(0, nextRunAt - Date.now())
+  console.log('[AUTO-SEO] Started — last run:', state.lastRun || 'never', '| total updated:', state.videosUpdated || 0, '| next in:', Math.round(msUntil / 3600000) + 'h')
+  // Schedule auto-run
+  setTimeout(async function _seoLoop() {
     await run()
-  }, INTERVAL_MS)
+    nextRunAt = Date.now() + INTERVAL_MS
+    setTimeout(_seoLoop, INTERVAL_MS)
+  }, msUntil)
 }
 
 function getStatus() {
   const state = readState()
+  const now = Date.now()
+  const msUntilNext = nextRunAt ? Math.max(0, nextRunAt - now) : null
   return {
     running,
-    nextRunAt:   new Date(nextRunAt).toISOString(),
-    msUntilNext: Math.max(0, nextRunAt - Date.now()),
-    lastRun:     state.lastRun,
+    lastRun:      state.lastRun,
     totalUpdated: state.videosUpdated || 0,
     trendingUsed: state.trendingUsed || [],
+    nextRunAt:    nextRunAt ? new Date(nextRunAt).toISOString() : null,
+    msUntilNext,
     lastResult,
   }
 }

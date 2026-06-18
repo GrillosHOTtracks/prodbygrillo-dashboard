@@ -1,14 +1,21 @@
 require('dotenv').config()
 const express = require('express')
+const fs      = require('fs')
+const path    = require('path')
 const Groq = require('groq-sdk')
-const { GoogleGenerativeAI } = require('@google/generative-ai')
 const { jsonrepair } = require('jsonrepair')
+
+const SCHEDULE_FILE = path.join(__dirname, '../data/schedule.json')
+const UPLOADS_FILE  = path.join(__dirname, '../data/uploads.json')
+
+function loadSchedule() { try { return JSON.parse(fs.readFileSync(SCHEDULE_FILE, 'utf-8')) } catch { return [] } }
+function loadUploads()  { try { return JSON.parse(fs.readFileSync(UPLOADS_FILE,  'utf-8')) } catch { return [] } }
 
 const router = express.Router()
 
 // ─── Chat prompt builder ──────────────────────────────────────────────────────
 function buildChatPrompt(ctx, history, question) {
-  let prompt = `És LAIS, analista do canal prodbygrillo. O teu papel é analisar os dados reais do canal e dar respostas concretas, directas e accionáveis. Respondes sempre em português de Portugal. Sem introduções, sem rodeios — vai directo aos números e às conclusões. Evita linguagem genérica quando tens dados disponíveis.`
+  let prompt = `És LAIS, analista e planeadora de conteúdo do canal prodbygrillo. O teu papel é analisar os dados reais do canal, o cronograma de beats planeados e o histórico de uploads — dando respostas concretas, directas e accionáveis. Respondes sempre em português de Portugal. Sem introduções, sem rodeios — vai directo aos números e às conclusões. Evita linguagem genérica quando tens dados disponíveis.`
 
   if (ctx?.channel) {
     const c = ctx.channel
@@ -45,6 +52,32 @@ function buildChatPrompt(ctx, history, question) {
     prompt += `\n\n## Top ${ctx.videos.length} vídeos (por views)`
     ctx.videos.forEach((v, i) => {
       prompt += `\n${i + 1}. "${v.title}" — ${(v.views || 0).toLocaleString('pt-PT')} views | CTR: ${v.ctr}% | publicado: ${(v.publishedAt || '').slice(0, 10)}`
+    })
+  }
+
+  // ── Cronograma de beats planeados ──────────────────────────────────────────
+  if (ctx?.schedule?.length) {
+    const today = new Date().toISOString().slice(0, 10)
+    const upcoming = ctx.schedule.filter(e => e.status === 'planned' && e.date >= today)
+    const done     = ctx.schedule.filter(e => e.status === 'posted').slice(-5)
+    if (upcoming.length) {
+      prompt += `\n\n## Cronograma — Próximos Beats a Criar (${upcoming.length})`
+      upcoming.forEach(e => {
+        const title = `[FREE] ${e.anchorArtist} Type Beat - "${e.beatName}"${e.secondaryArtist ? ` | ${e.secondaryArtist} Type Beat` : ''}`
+        prompt += `\n- ${e.date}: ${title}`
+      })
+    }
+    if (done.length) {
+      prompt += `\n\n## Cronograma — Últimos Beats Concluídos`
+      done.forEach(e => { prompt += `\n- ${e.date}: "${e.beatName}" ✓` })
+    }
+  }
+
+  // ── Histórico de uploads recentes ──────────────────────────────────────────
+  if (ctx?.uploadHistory?.length) {
+    prompt += `\n\n## Uploads Recentes (últimos ${ctx.uploadHistory.length})`
+    ctx.uploadHistory.forEach(e => {
+      prompt += `\n- ${(e.publishedAt || '').slice(0, 10)} | ${e.status === 'live' ? '● LIVE' : '◌ AGENDADO'} | ${(e.views || 0)} views | "${e.title?.slice(0, 60)}"`
     })
   }
 
@@ -133,47 +166,100 @@ function sanitizeJsonStrings(raw) {
   return result
 }
 
-// ─── Assemble description server-side — ensures correct format regardless of model ──
-function buildDescription(parsed, beatName, detectedBpm, detectedKey) {
-  const artists  = (parsed.trendingComparison?.matchingArtists || []).slice(0, 3).join(' x ')
-  const bpm      = detectedBpm ?? parsed.bpm ?? null
-  const key      = detectedKey ?? parsed.key ?? null
-  const bpmLine  = [bpm ? `${bpm} BPM` : null, key || null].filter(Boolean).join(' | ') || '[BPM] BPM | [KEY]'
-  const hashtags = (parsed.hashtags || []).join(' ')
+// ─── Build video title (x9beatz dual-SEO format) ─────────────────────────────
+// Solo:   [FREE] Lil Baby Type Beat - "Beat Name" | Rod Wave Type Beat
+// Collab: [FREE] Lil Baby x Toosii Type Beat - "Beat Name" | Rod Wave Type Beat
+//
+// forcedSecondary (from Agenda plan) is ALWAYS reserved for the | pipe position.
+// It is never promoted to the x collab slot.
+function buildTitle(parsed, beatName, mainArtist, forcedSecondary) {
+  const allArtists = parsed.trendingComparison?.matchingArtists || []
 
-  return [
-    `🦗 ${artists} Type Beat - ${beatName} prodbygrillo`,
-    '',
-    '💰 BUY (Untagged): https://www.beatstars.com/prodbygrillo',
-    '',
-    `🎵 ${bpmLine}`,
-    '',
-    '📋 LEASING:',
-    '* MP3 Lease - $24.99',
-    '',
-    '📩 Custom beats & exclusives: DM @prodbygrillo',
-    '',
-    '━━━━━━━━━━━━━━━━━━━',
-    '🚫 TERMS OF USE 🚫',
-    '━━━━━━━━━━━━━━━━━━━',
-    '✅ FREE for non-profit use only',
-    '✅ MUST credit prodbygrillo in the title',
-    '✅ MUST tag @prodbygrillo on social media',
-    '❌ NO monetization without purchasing a lease',
-    '❌ NO distribution to Spotify/Apple Music without lease',
-    '❌ NO selling, leasing or transferring this beat',
-    '',
-    '━━━━━━━━━━━━━━━━━━━',
-    '🔗 FOLLOW',
-    '━━━━━━━━━━━━━━━━━━━',
-    '📱 TikTok: @prodbygrillo',
-    '📷 Instagram: @prodbygrillo',
-    '🛒 BeatStars: beatstars.com/prodbygrillo',
-    ...(hashtags ? ['', hashtags] : []),
-  ].join('\n')
+  let titleArtists
+  if (mainArtist) {
+    if (forcedSecondary) {
+      // Plan-driven: solo format — forcedSecondary goes to the | pipe, no x collab
+      titleArtists = mainArtist
+    } else {
+      // No plan: pick a collab from matchingArtists for x format
+      const excluded = new Set([mainArtist].map(s => s.toLowerCase().trim()))
+      const collab = allArtists.find(a => !excluded.has(a.toLowerCase().trim())) || null
+      titleArtists = collab ? `${mainArtist} x ${collab}` : mainArtist
+    }
+  } else {
+    titleArtists = allArtists.slice(0, 2).join(' x ') || 'Type'
+  }
+
+  // Pipe secondary: forced value takes priority; falls back to AI's pick if not already in the title
+  const usedNames = new Set(titleArtists.split(' x ').map(s => s.toLowerCase().trim()))
+  let secondary = null
+  if (forcedSecondary && !usedNames.has(forcedSecondary.toLowerCase().trim())) {
+    secondary = forcedSecondary
+  } else if (!forcedSecondary) {
+    const aiPick = typeof parsed.secondaryArtist === 'string' ? parsed.secondaryArtist.trim() : ''
+    if (aiPick && !usedNames.has(aiPick.toLowerCase())) secondary = aiPick
+  }
+
+  const base = `[FREE] ${titleArtists} Type Beat - "${beatName}"`
+  return secondary ? `${base} | ${secondary} Type Beat` : base
 }
 
-function buildPrompt(beatName, detectedBpm, detectedKey, marketCtx) {
+// ─── Assemble description server-side ────────────────────────────────────────
+function buildDescription(parsed, beatName, detectedBpm, detectedKey, mainArtist, forcedSecondary) {
+  const videoTitle = buildTitle(parsed, beatName, mainArtist, forcedSecondary)
+  const bpm        = detectedBpm ?? parsed.bpm ?? null
+  const key        = detectedKey ?? parsed.key ?? null
+  const year       = new Date().getFullYear()
+  const secondary  = forcedSecondary || (typeof parsed.secondaryArtist === 'string' ? parsed.secondaryArtist.trim() : '')
+  const vibes      = (parsed.trendingComparison?.vibes || []).slice(0, 3).join(', ')
+
+  // ── Keyword-rich opening (indexed by YouTube above the fold) ─────────────
+  const artistLine = secondary
+    ? `Free ${mainArtist} Type Beat ${year} | Free ${secondary} Type Beat ${year} | "${beatName}"`
+    : `Free ${mainArtist} Type Beat ${year} | "${beatName}"`
+
+  const keywordPara = secondary
+    ? `Free ${mainArtist} x ${secondary} type beat instrumental produced by prodbygrillo.${vibes ? ` ${vibes.charAt(0).toUpperCase() + vibes.slice(1)} vibes.` : ''} Perfect for artists looking for a ${mainArtist} type beat, ${secondary} type beat, or any ${vibes || 'melodic trap'} instrumental ${year}.`
+    : `Free ${mainArtist} type beat instrumental produced by prodbygrillo.${vibes ? ` ${vibes.charAt(0).toUpperCase() + vibes.slice(1)} vibes.` : ''}`
+
+  const bpmKeyLine = [bpm ? `BPM: ${bpm}` : null, key ? `Key: ${key}` : null].filter(Boolean).join(' | ')
+
+  const lines = [
+    videoTitle,
+    '',
+    artistLine,
+    keywordPara,
+    '',
+    '💰 Download/Purchase: https://www.beatstars.com/prodbygrillo',
+    '',
+    '📋 LEASING OPTIONS:',
+    '• MP3 Lease — $24.99',
+    '• WAV Lease — $34.99',
+    '• Unlimited Lease — $99.99',
+    '• Exclusive Rights — DM for pricing',
+    '',
+    `FREE FOR NON-PROFIT only. To monetize on any distribution platform, purchase a lease.`,
+    '',
+    ...(bpmKeyLine ? [`🎵 ${bpmKeyLine}`] : []),
+    '✍️ Credit required in song title: (prod. prodbygrillo)',
+    '',
+    '🔔 Subscribe for free type beats daily → https://www.youtube.com/@prodbygrillo?sub_confirmation=1',
+    '',
+    '📩 Contact & Socials:',
+    'DM: @prodbygrillo',
+    'Instagram: @prodbygrillo',
+    'TikTok: @prodbygrillo',
+    'BeatStars: beatstars.com/prodbygrillo',
+  ]
+
+  // Remove consecutive blank lines
+  return lines.reduce((acc, line, i, arr) => {
+    if (line === '' && arr[i - 1] === '') return acc
+    return acc + (acc ? '\n' : '') + line
+  }, '')
+}
+
+function buildPrompt(beatName, detectedBpm, detectedKey, mainArtist, forcedSecondary) {
   const now    = new Date()
   const month  = now.toLocaleString('en-US', { month: 'long' })
   const year   = now.getFullYear()
@@ -196,31 +282,26 @@ function buildPrompt(beatName, detectedBpm, detectedKey, marketCtx) {
       (detectedKey !== null ? `- Key: ${detectedKey}\n` : '')
     : ''
 
-  const marketNote = (() => {
-    if (!marketCtx) return ''
-    const clean = s => String(s || '').replace(/[^\w\s\-.,#&'()]/g, '').trim().slice(0, 60)
-    const artist   = clean(marketCtx.artist)
-    const niche    = clean(marketCtx.niche)
-    const keywords = (marketCtx.keywords || []).slice(0, 8).map(k => clean(k)).filter(Boolean).join(', ')
-    const bpmLine  = !detectedBpm && marketCtx.bpm  ? `- Use BPM: ${marketCtx.bpm}\n` : ''
-    const keyLine  = !detectedKey && marketCtx.key  ? `- Use key: ${clean(marketCtx.key)}\n` : ''
-    return `\n\nMARKET DATA (use this to override generic choices):\n` +
-      `- Primary artist: ${artist} (put first in matchingArtists and in optimizedTitle)\n` +
-      `- Niche: ${niche}\n` +
-      `- Reference artists for tags: ${keywords}\n` +
-      bpmLine + keyLine +
-      `- thumbnail.concept must reflect the ${niche} niche aesthetic\n`
-  })()
+  const forcedSecondaryNote = forcedSecondary
+    ? `\n\nFORCED SECONDARY ARTIST — The production plan mandates "${forcedSecondary}" as the pipe secondary (after |). You MUST return "secondaryArtist": "${forcedSecondary}" in your JSON. Do NOT place "${forcedSecondary}" in the x collab slot or in matchingArtists[0].\n`
+    : ''
+
+  const artistAnchor = mainArtist
+    ? `\n\nARTIST ANCHOR — The filename identifies "${mainArtist}" as the primary artist reference. Rules:\n` +
+      `- "${mainArtist}" MUST be the FIRST entry in matchingArtists — never replace or move it.\n` +
+      `- Add 1-2 complementary artists after it that match the same genre/vibe.\n` +
+      `- optimizedTitle MUST start with [FREE] ${mainArtist} x <complementary1> x <complementary2> Type Beat ${new Date().getFullYear()}.\n` +
+      `- Every artist-based tag MUST lead with "${mainArtist}": "${mainArtist} type beat", "${mainArtist} free type beat", "${mainArtist} x [other] type beat", "${mainArtist} prodbygrillo", etc.\n` +
+      `- thumbnail.concept must be inspired by "${mainArtist}"'s visual aesthetic.\n`
+    : ''
 
   return `You are an expert in YouTube SEO and digital marketing for beat producers, with encyclopedic knowledge of RnB, PluggnB, Melodic Trap, Drill, Afrobeats, and all instrumental/type-beat subgenres.
 
 VARIATION SEED: ${seed}
 CREATIVE ANGLE FOR THIS ANALYSIS: ${angle}
 
-You MUST produce a completely unique analysis every time. Never reuse titles, tags, or suggestions from previous analyses. The seed and angle above must influence your output in a measurable way.
-
-Analyze the following beat name for a YouTube upload:
-"${beatName}"${audioNote}${marketNote}
+Your ONLY source of truth is this beat name: "${beatName}"
+Generate ALL content (title, description, tags, hashtags, matching artists, thumbnail concept) based EXCLUSIVELY on this name. Derive genre, mood, and artist references from what the name evokes. Never invent content unrelated to it, never copy examples from the schema below literally, and never output a beat name different from the one provided.${audioNote}${artistAnchor}${forcedSecondaryNote}
 
 Context: it is ${month} ${year}. You have deep knowledge of:
 - Current trending artists across all subgenres of trap, RnB, PluggnB, melodic rap
@@ -231,39 +312,17 @@ Context: it is ${month} ${year}. You have deep knowledge of:
 - Musical theory — infer BPM and key signature from the beat name, mood keywords, and genre context
 - The difference between "type beat" keyword clustering vs. artist-specific search intent
 
-CRITICAL — The "description" field MUST use EXACTLY this template. Fill in only the bracketed placeholders; copy everything else character-for-character including all emojis, dashes, and symbols:
+DUAL-SEO RULE: The title uses the format: [FREE] ANCHOR Type Beat - "Name" | SECONDARY Type Beat. Choose a secondaryArtist with high search volume in the type beat niche that matches the vibe — this makes the video appear in TWO different artist searches. Pick from: Loe Shimmy, Rod Wave, Toosii, Gunna, Lil Baby, Don Toliver, 42 Dugg, NBA YoungBoy, Kodak Black — whichever fits the mood best.
 
-🦗 [TOP 2-3 ARTISTS FROM matchingArtists, e.g. Lil Baby x Rod Wave] Type Beat - [BEAT_NAME] prodbygrillo
+TAGS RULE: Generate tags anchored to "${mainArtist || '<artist>'}". Pattern:
+1. "${mainArtist || '<artist>'} type beat", "free ${mainArtist || '<artist>'} type beat", "${mainArtist || '<artist>'} type beat free", "${mainArtist || '<artist>'} instrumental", "${mainArtist || '<artist>'} type beat ${new Date().getFullYear()}"
+2. If collab artist: "[collab] type beat", "free [collab] type beat", "[collab] x ${mainArtist || '<artist>'} type beat", "[collab] type beat ${new Date().getFullYear()}"
+3. Genre-specific (3-4 tags): match the vibe — e.g. "melodic trap type beat", "pluggnb type beat", "drill type beat", "rnb type beat"
+4. Location tags (2-3): infer from artist origin — e.g. "atlanta type beat", "florida type beat", "new york type beat", "chicago type beat", "london drill type beat"
+5. Mood tags (2-3): e.g. "dark type beat", "emotional type beat", "sad type beat", "aggressive type beat"
+6. The server will add generic tags automatically — do NOT include: "type beat", "free type beat", "free beats", "rap beat", "no copyright beats", "beats to rap to", "prod by prodbygrillo" — focus your tags on artist+genre+location+mood only.
 
-💰 BUY (Untagged): https://www.beatstars.com/prodbygrillo
-
-🎵 ${detectedBpm !== null ? detectedBpm : '[INFERRED_BPM]'} BPM | ${detectedKey !== null ? detectedKey : '[INFERRED_KEY]'}
-
-📋 LEASING:
-* MP3 Lease - $24.99
-
-📩 Custom beats & exclusives: DM @prodbygrillo
-
-━━━━━━━━━━━━━━━━━━━
-🚫 TERMS OF USE 🚫
-━━━━━━━━━━━━━━━━━━━
-✅ FREE for non-profit use only
-✅ MUST credit prodbygrillo in the title
-✅ MUST tag @prodbygrillo on social media
-❌ NO monetization without purchasing a lease
-❌ NO distribution to Spotify/Apple Music without lease
-❌ NO selling, leasing or transferring this beat
-
-━━━━━━━━━━━━━━━━━━━
-🔗 FOLLOW
-━━━━━━━━━━━━━━━━━━━
-📱 TikTok: @prodbygrillo
-📷 Instagram: @prodbygrillo
-🛒 BeatStars: beatstars.com/prodbygrillo
-
-[ALL HASHTAGS FROM hashtags ARRAY JOINED WITH SPACES]
-
-The description value in JSON must be a single string with \\n for every line break. Keep all emojis, ━ symbols, ✅ ❌ exactly as shown above. NEVER use double-quote characters (") inside the description string — they break JSON. Use single quotes (') if quoting is needed.
+TITLE/DESCRIPTION: Both are built server-side. Set "optimizedTitle" and "description" to "" (empty string) in your JSON.
 
 Return ONLY valid JSON, no markdown, no extra text. Use this exact structure:
 
@@ -282,10 +341,14 @@ Return ONLY valid JSON, no markdown, no extra text. Use this exact structure:
       "optimized alternative title 3"
     ]
   },
-  "optimizedTitle": "YouTube title within 70 chars that maximizes reach — always include [FREE], top 2-3 matching artist names joined with x, genre keyword, 'Type Beat', and year. Example: '[FREE] Drake x PartyNextDoor x Loe Shimmy Type Beat 2026'. Front-load the most searchable artist name.",
-  "description": "<FULL DESCRIPTION USING THE TEMPLATE ABOVE — single string, \\n for each line break>",
-  "tags": ["tag1", "tag2", "tag3", "tag4", "tag5", "tag6", "tag7", "tag8", "tag9", "tag10", "tag11", "tag12", "tag13", "tag14", "tag15"],
-  "hashtags": ["#hashtag1", "#hashtag2", "#hashtag3", "#hashtag4", "#hashtag5", "#hashtag6", "#hashtag7", "#hashtag8", "#hashtag9", "#hashtag10"],
+  "optimizedTitle": "Built server-side — leave as empty string ''",
+  "description": "Built server-side — leave as empty string ''",
+  "secondaryArtist": "<ONE artist for dual-SEO after the pipe: pick someone who shares the same vibe as ${mainArtist || 'the main artist'} and has high search volume in type beats — e.g. Loe Shimmy, Rod Wave, Toosii, Gunna, Lil Baby. Must be DIFFERENT from any artist already in matchingArtists. Return null if no good fit.>",
+  "tags": ${mainArtist
+    ? `["${mainArtist} type beat", "free ${mainArtist} type beat", "${mainArtist} type beat free", "${mainArtist} instrumental", "${mainArtist} type beat ${new Date().getFullYear()}", "free type beat", "type beat", "beats", "free beats", "rap beat", "free beat", "hip hop beat", "type beat ${new Date().getFullYear()}", "sample type beat", "<add 3-5 genre-specific tags matching the vibe of '${beatName}' e.g. 'philly drill type beat', 'melodic trap type beat', 'pluggnb type beat'>"]`
+    : `["<artist1> type beat", "free <artist1> type beat", "<artist1> type beat free", "<artist1> instrumental", "<artist1> type beat ${new Date().getFullYear()}", "free type beat", "type beat", "beats", "free beats", "rap beat", "free beat", "hip hop beat", "type beat ${new Date().getFullYear()}", "sample type beat", "<3-5 genre-specific tags>"]`
+  },
+  "hashtags": ["#<mainartistnospaces>typebeat", "#typebeat", "#sampletypebeat", "#freetypebeat", "#<genre>typebeat", "#freebeat", "#rapbeat", "#hiphop", "#<mood>typebeat", "#typebeat${new Date().getFullYear()}"],
   "thumbnail": {
     "concept": "detailed visual description of the thumbnail concept",
     "colors": ["#hex1", "#hex2", "#hex3"],
@@ -311,12 +374,13 @@ Return ONLY valid JSON, no markdown, no extra text. Use this exact structure:
 
 // POST /api/ai/analyze-beat  — streams SSE
 router.post('/analyze-beat', async (req, res) => {
-  const { beatName, bpm, key, marketContext } = req.body
+  const { beatName, bpm, key, mainArtist, secondaryArtist: rawSecondary } = req.body
   if (!beatName || typeof beatName !== 'string' || !beatName.trim()) {
     return res.status(400).json({ error: 'beatName is required' })
   }
-  const detectedBpm = typeof bpm === 'number' && Number.isFinite(bpm) ? Math.round(bpm) : null
-  const detectedKey = typeof key === 'string' && key.trim() ? key.trim() : null
+  const detectedBpm   = typeof bpm === 'number' && Number.isFinite(bpm) ? Math.round(bpm) : null
+  const detectedKey   = typeof key === 'string' && key.trim() ? key.trim() : null
+  const cleanSecondary = typeof rawSecondary === 'string' && rawSecondary.trim() ? rawSecondary.trim() : null
 
   const apiKey = process.env.GROQ_API_KEY
   if (!apiKey) {
@@ -346,7 +410,7 @@ router.post('/analyze-beat', async (req, res) => {
           model: MODELS[mi],
           max_tokens: 4096,
           stream: true,
-          messages: [{ role: 'user', content: buildPrompt(beatName.trim(), detectedBpm, detectedKey, marketContext || null) }],
+          messages: [{ role: 'user', content: buildPrompt(beatName.trim(), detectedBpm, detectedKey, typeof mainArtist === 'string' && mainArtist.trim() ? mainArtist.trim() : null, cleanSecondary) }],
         })
         for await (const chunk of stream) {
           const text = chunk.choices[0]?.delta?.content || ''
@@ -385,8 +449,59 @@ router.post('/analyze-beat', async (req, res) => {
       }
     }
 
-    // Override description with server-built version — guaranteed correct format
-    parsed.description = buildDescription(parsed, beatName.trim(), detectedBpm, detectedKey)
+    // Build title and description server-side (guaranteed December channel format)
+    const cleanMain = typeof mainArtist === 'string' && mainArtist.trim() ? mainArtist.trim() : null
+    // Force secondaryArtist from plan before title/tag building
+    if (cleanSecondary) parsed.secondaryArtist = cleanSecondary
+    parsed.optimizedTitle = buildTitle(parsed, beatName.trim(), cleanMain, cleanSecondary)
+    parsed.description    = buildDescription(parsed, beatName.trim(), detectedBpm, detectedKey, cleanMain, cleanSecondary)
+
+    // Rebuild tags server-side anchored to mainArtist (December channel pattern)
+    const year = new Date().getFullYear()
+    if (cleanMain) {
+      const anchor = cleanMain
+      const collab = (parsed.trendingComparison?.matchingArtists || [])
+        .find(a => a.toLowerCase().trim() !== anchor.toLowerCase().trim())
+
+      // Secondary must differ from anchor and collab to avoid duplicate tags
+      const usedInTitle = new Set([anchor, collab].filter(Boolean).map(s => s.toLowerCase().trim()))
+      const secondary = typeof parsed.secondaryArtist === 'string' && parsed.secondaryArtist.trim()
+        && !usedInTitle.has(parsed.secondaryArtist.trim().toLowerCase())
+        ? parsed.secondaryArtist.trim() : null
+
+      const coreTags = [
+        `${anchor} type beat`,
+        `free ${anchor} type beat`,
+        `${anchor} type beat free`,
+        `${anchor} instrumental`,
+        `${anchor} type beat ${year}`,
+        `${anchor} prod prodbygrillo`,
+        ...(collab ? [
+          `${collab} type beat`,
+          `free ${collab} type beat`,
+          `${collab} x ${anchor} type beat`,
+          `${collab} type beat ${year}`,
+        ] : []),
+        ...(secondary ? [
+          `${secondary} type beat`,
+          `free ${secondary} type beat`,
+          `${secondary} type beat ${year}`,
+          `${anchor} x ${secondary} type beat`,
+        ] : []),
+      ]
+      const genericTags = [
+        'type beat', 'free type beat', 'free beats', 'rap beat', 'beats',
+        'free beat', 'hip hop beat', 'sample type beat', `type beat ${year}`,
+        'no copyright beats', 'beats to rap to', 'rap instrumentals',
+        'free instrumentals', 'prod by prodbygrillo', 'prodbygrillo',
+      ]
+      // Keep AI genre-specific tags (filter out anything already in core/generic)
+      const coreSet = new Set([...coreTags, ...genericTags].map(t => t.toLowerCase()))
+      const aiGenre = (parsed.tags || []).filter(t => !coreSet.has(t.toLowerCase().trim())).slice(0, 10)
+
+      parsed.tags = [...coreTags, ...aiGenre, ...genericTags]
+    }
+
     clean = JSON.stringify(parsed)
 
     // Re-stream in chunks so the frontend terminal shows the build-up effect
@@ -412,6 +527,13 @@ router.post('/chat', async (req, res) => {
   }
   const tokenLimit = typeof maxTokens === 'number' ? Math.min(Math.max(maxTokens, 256), 4096) : 1024
 
+  // Inject schedule and upload history into context automatically
+  const enrichedContext = {
+    ...(context || {}),
+    schedule:      loadSchedule(),
+    uploadHistory: loadUploads().slice(0, 15),
+  }
+
   const apiKey = process.env.GROQ_API_KEY
   if (!apiKey) {
     return res.status(503).json({ error: 'GROQ_API_KEY não configurada no .env', code: 'NO_API_KEY' })
@@ -429,7 +551,7 @@ router.post('/chat', async (req, res) => {
     const client = new Groq({ apiKey })
     const prompt = (typeof systemPrompt === 'string' && systemPrompt.trim())
       ? `${systemPrompt.trim()}\n\n${question.trim()}`
-      : buildChatPrompt(context, history, question.trim())
+      : buildChatPrompt(enrichedContext, history, question.trim())
     const MODELS = ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant']
 
     let streamed = false

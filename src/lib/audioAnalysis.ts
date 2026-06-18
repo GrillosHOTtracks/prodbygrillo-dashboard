@@ -1,10 +1,14 @@
 import { analyze as beatDetectorAnalyze } from 'web-audio-beat-detector'
 
-// ─── Bellman-Budge key profiles (rooted at C) — higher contrast than KS ──────
-// Ratio tonic:weakest ≈ 33:1 vs 2.85:1 in KS → far less major/minor confusion
-const KS_MAJOR = [16.80, 0.86, 12.95, 1.41, 13.49, 11.93, 1.25, 20.28, 1.80, 8.04, 0.62, 10.57]
-const KS_MINOR = [18.16, 0.69, 12.99, 13.34, 1.07, 11.15, 1.38, 21.07, 7.49, 1.53, 0.92, 10.21]
+// Krumhansl-Kessler (1982) tonal hierarchy profiles — the foundation of TuneBat,
+// Mixed In Key, KeyFinder and virtually every professional key detection tool.
+// Derived from listener probe-tone experiments; validated across pop/electronic music.
+const KK_MAJOR = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88]
+const KK_MINOR = [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17]
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
+
+const FFT_SIZE = 4096
+const HOP      = 2048
 
 // ─── Pearson correlation ──────────────────────────────────────────────────────
 function pearson(a: number[], b: number[]): number {
@@ -50,37 +54,29 @@ function fft(re: Float32Array, im: Float32Array): void {
   }
 }
 
-// ─── Chromagram using STFT ────────────────────────────────────────────────────
-function computeChromagram(mono: Float32Array, sampleRate: number): number[] {
-  const FFT_SIZE = 4096
-  const HOP      = 2048
-  const chroma   = new Array(12).fill(0)
-  // Analyse at most the first 90 s — more data → better statistics
-  const limit = Math.min(mono.length, 90 * sampleRate)
-  let frames = 0
-
+// ─── Chromagram (STFT) over a mono segment ───────────────────────────────────
+function computeChromagram(seg: Float32Array, sampleRate: number): number[] {
+  const chroma = new Array(12).fill(0)
   const re = new Float32Array(FFT_SIZE)
   const im = new Float32Array(FFT_SIZE)
+  let frames = 0
 
-  for (let offset = 0; offset + FFT_SIZE <= limit; offset += HOP, frames++) {
-    // Hann window + copy
+  for (let offset = 0; offset + FFT_SIZE <= seg.length; offset += HOP, frames++) {
     for (let i = 0; i < FFT_SIZE; i++) {
       const w = 0.5 * (1 - Math.cos((2 * Math.PI * i) / (FFT_SIZE - 1)))
-      re[i] = mono[offset + i] * w
+      re[i] = seg[offset + i] * w
       im[i] = 0
     }
     fft(re, im)
 
-    // Accumulate energy per pitch class with bass-emphasis weighting.
-    // Range 65 Hz (C2) – 2100 Hz (C7): captures bass/808 and melody,
-    // excludes sub-bass rumble (<65 Hz) and hi-hat/cymbal noise (>2100 Hz).
+    // 80 Hz – 2100 Hz: starts above most sub-bass rumble to reduce 808 dominance.
+    // Balanced weighting: melody (700Hz+) carries more key information than bass alone.
     for (let bin = 1; bin < FFT_SIZE >> 1; bin++) {
       const freq = (bin * sampleRate) / FFT_SIZE
-      if (freq < 65 || freq > 2100) continue
+      if (freq < 80 || freq > 2100) continue
       const midi = 12 * Math.log2(freq / 440) + 69
       const pc   = ((Math.round(midi) % 12) + 12) % 12
-      // Weight bass 4×, low-mid 2× — 808/bass establishes the key
-      const w = freq < 300 ? 4 : freq < 700 ? 2 : 1
+      const w    = freq < 300 ? 1.5 : freq < 700 ? 2 : 2.5
       chroma[pc] += (re[bin] * re[bin] + im[bin] * im[bin]) * w
     }
   }
@@ -90,18 +86,18 @@ function computeChromagram(mono: Float32Array, sampleRate: number): number[] {
   return max > 0 ? chroma.map(v => v / max) : chroma
 }
 
-// ─── Krumhansl-Schmuckler key detection ──────────────────────────────────────
-function detectKeyFromChroma(chroma: number[]): string {
-  let bestKey = 'Am', bestCorr = -Infinity
+// ─── KK key detection — returns { root 0-11, mode 'M'|'m', corr } ────────────
+function detectKeyFromChroma(chroma: number[]): { root: number; mode: 'M' | 'm'; corr: number } {
+  let bestRoot = 9, bestMode: 'M' | 'm' = 'm', bestCorr = -Infinity
   for (let root = 0; root < 12; root++) {
-    const maj = KS_MAJOR.map((_, i) => KS_MAJOR[(i - root + 12) % 12])
-    const min = KS_MINOR.map((_, i) => KS_MINOR[(i - root + 12) % 12])
+    const maj = KK_MAJOR.map((_, i) => KK_MAJOR[(i - root + 12) % 12])
+    const min = KK_MINOR.map((_, i) => KK_MINOR[(i - root + 12) % 12])
     const cMaj = pearson(chroma, maj)
     const cMin = pearson(chroma, min)
-    if (cMaj > bestCorr) { bestCorr = cMaj; bestKey = NOTE_NAMES[root] + 'M' }
-    if (cMin > bestCorr) { bestCorr = cMin; bestKey = NOTE_NAMES[root] + 'm' }
+    if (cMaj > bestCorr) { bestCorr = cMaj; bestRoot = root; bestMode = 'M' }
+    if (cMin > bestCorr) { bestCorr = cMin; bestRoot = root; bestMode = 'm' }
   }
-  return bestKey
+  return { root: bestRoot, mode: bestMode, corr: bestCorr }
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -124,20 +120,42 @@ export async function analyzeAudio(
       for (let i = 0; i < mono.length; i++) mono[i] /= buffer.numberOfChannels
     }
 
-    // Run BPM and key detection in parallel
-    const [bpmResult, keyResult] = await Promise.allSettled([
-      beatDetectorAnalyze(buffer),
-      Promise.resolve(detectKeyFromChroma(computeChromagram(mono, buffer.sampleRate))),
-    ])
+    // Multi-segment key detection with weighted voting (mimics TuneBat's multi-pass approach).
+    // Skip first 10 s (intro), analyse 3 × 30 s segments covering the main body.
+    // Each segment casts a vote weighted by its correlation confidence.
+    const sr      = buffer.sampleRate
+    const SKIP    = 10 * sr
+    const SEG_LEN = 30 * sr
 
+    const candidateStarts = [SKIP, SKIP + SEG_LEN, SKIP + 2 * SEG_LEN]
+      .filter(s => s + FFT_SIZE <= mono.length)
+    if (candidateStarts.length === 0) candidateStarts.push(0)
+
+    // Accumulate confidence-weighted votes per key
+    const scores = new Map<string, number>()
+    for (const start of candidateStarts) {
+      const seg = mono.subarray(start, Math.min(start + SEG_LEN, mono.length))
+      const { root, mode, corr } = detectKeyFromChroma(computeChromagram(seg, sr))
+      const k = `${root}|${mode}`
+      scores.set(k, (scores.get(k) || 0) + Math.max(corr, 0))
+    }
+
+    let bestK = '9|m'
+    let bestScore = -Infinity
+    for (const [k, s] of scores) { if (s > bestScore) { bestScore = s; bestK = k } }
+
+    const [rootStr, mode] = bestK.split('|') as [string, 'M' | 'm']
+    const root = parseInt(rootStr)
+    const keyStr = mode === 'M'
+      ? `${NOTE_NAMES[root]} Major`
+      : `${NOTE_NAMES[root]} Minor`
+
+    const [bpmResult] = await Promise.allSettled([beatDetectorAnalyze(buffer)])
     const bpm = bpmResult.status === 'fulfilled' && typeof bpmResult.value === 'number'
       ? Math.round(bpmResult.value)
       : null
-    const key = keyResult.status === 'fulfilled' && keyResult.value
-      ? keyResult.value
-      : null
 
-    return { bpm, key }
+    return { bpm, key: keyStr }
   } catch {
     return { bpm: null, key: null }
   } finally {

@@ -47,7 +47,7 @@
     "beatName": "Voodoo Magic",
     "genre": "melodic trap",
     "filenameTemplate": "Hurricane Wisdom Type Beat 2026 - Voodoo Magic",
-    "status": "planned"
+    "status": "posted"
   },
   {
     "id": "plan_1780805873092_t257",
@@ -57,116 +57,86 @@
     "beatName": "Dark Alley",
     "genre": "drill",
     "filenameTemplate": "42 Dugg Type Beat 2026 - Dark Alley",
-    "status": "planned"
+    "status": "posted"
   },
   {
-    "id": "plan_1780805873092_a8ce",
+    "id": "plan_1781298784546_8eeq",
     "date": "2026-06-13",
-    "anchorArtist": "Hurricane Wisdom",
-    "secondaryArtist": "NBA YoungBoy",
-    "beatName": "Ghost Town",
-    "genre": "dark trap",
-    "filenameTemplate": "Hurricane Wisdom Type Beat 2026 - Ghost Town",
-    "status": "planned"
-  },
-  {
-    "id": "plan_1780848893342_8swk",
-    "date": "2026-06-20",
-    "anchorArtist": "Hurricane Wisdom",
-    "secondaryArtist": "Loe Shimmy",
-    "beatName": "Midnight Dreams",
-    "genre": "melodic trap",
-    "filenameTemplate": "Hurricane Wisdom Type Beat 2026 - Midnight Dreams",
-    "status": "planned"
-  },
-  {
-    "id": "plan_1780848893342_mt5a",
-    "date": "2026-06-21",
-    "anchorArtist": "Rod Wave",
+    "anchorArtist": "Gunna",
     "secondaryArtist": "Hurricane Wisdom",
-    "beatName": "Heartbreak",
-    "genre": "RnB",
-    "filenameTemplate": "Rod Wave Type Beat 2026 - Heartbreak",
-    "status": "planned"
-  },
-  {
-    "id": "plan_1780848893342_v9it",
-    "date": "2026-06-22",
-    "anchorArtist": "Hurricane Wisdom",
-    "secondaryArtist": "Toosii",
-    "beatName": "Cold Summer",
-    "genre": "pluggnb",
-    "filenameTemplate": "Hurricane Wisdom Type Beat 2026 - Cold Summer",
-    "status": "planned"
-  },
-  {
-    "id": "plan_1780848893342_4gsv",
-    "date": "2026-06-23",
-    "anchorArtist": "Hurricane Wisdom",
-    "secondaryArtist": "Gunna",
     "beatName": "Dark Nights",
     "genre": "dark trap",
-    "filenameTemplate": "Hurricane Wisdom Type Beat 2026 - Dark Nights",
-    "status": "planned"
+    "filenameTemplate": "Gunna Type Beat 2026 - Dark Nights",
+    "status": "posted"
   },
   {
-    "id": "plan_1780848893342_clon",
-    "date": "2026-06-24",
-    "anchorArtist": "Lil Baby",
+    "id": "plan_1781370373718_xopn",
+    "date": "2026-06-14",
+    "anchorArtist": "Nba Youngboy",
     "secondaryArtist": "Hurricane Wisdom",
-    "beatName": "Street Lights",
-    "genre": "drill",
-    "filenameTemplate": "Lil Baby Type Beat 2026 - Street Lights",
-    "status": "planned"
-  },
-  {
-    "id": "plan_1780848893342_koqg",
-    "date": "2026-06-25",
-    "anchorArtist": "Hurricane Wisdom",
-    "secondaryArtist": "Don Toliver",
-    "beatName": "Lost Memories",
-    "genre": "melodic trap",
-    "filenameTemplate": "Hurricane Wisdom Type Beat 2026 - Lost Memories",
-    "status": "planned"
-  },
-  {
-    "id": "plan_1780848893342_x515",
-    "date": "2026-06-26",
-    "anchorArtist": "Hurricane Wisdom",
-    "secondaryArtist": "42 Dugg",
-    "beatName": "Ghetto Gospel",
-    "genre": "pluggnb",
-    "filenameTemplate": "Hurricane Wisdom Type Beat 2026 - Ghetto Gospel",
-    "status": "planned"
-  },
-  {
-    "id": "plan_1780848893342_cohe",
-    "date": "2026-06-27",
-    "anchorArtist": "NBA YoungBoy",
-    "secondaryArtist": "Hurricane Wisdom",
-    "beatName": "Fast Life",
-    "genre": "dark trap",
-    "filenameTemplate": "NBA YoungBoy Type Beat 2026 - Fast Life",
-    "status": "planned"
-  },
-  {
-    "id": "plan_1780848893342_lx4o",
-    "date": "2026-06-28",
-    "anchorArtist": "Hurricane Wisdom",
-    "secondaryArtist": "Kodak Black",
-    "beatName": "Pain Music",
-    "genre": "RnB",
-    "filenameTemplate": "Hurricane Wisdom Type Beat 2026 - Pain Music",
-    "status": "planned"
-  },
-  {
-    "id": "plan_1780848893342_g7lm",
-    "date": "2026-06-29",
-    "anchorArtist": "Hurricane Wisdom",
-    "secondaryArtist": "Loe Shimmy",
     "beatName": "After Midnight",
     "genre": "drill",
-    "filenameTemplate": "Hurricane Wisdom Type Beat 2026 - After Midnight",
-    "status": "planned"
+    "filenameTemplate": "Nba Youngboy Type Beat 2026 - After Midnight",
+    "status": "posted"
+  },
+  {
+    "id": "plan_1781502136950_v0oj",
+    "date": "2026-06-15",
+    "anchorArtist": "Hurricane Wisdom",
+    "secondaryArtist": "Summrs X Goyxrd X Pluggnb",
+    "beatName": "Dark Nights",
+    "genre": "melodic trap",
+    "filenameTemplate": "Hurricane Wisdom Type Beat 2026 - Dark Nights",
+    "status": "posted"
+  },
+  {
+    "id": "plan_1781502136950_iqt9",
+    "date": "2026-06-16",
+    "anchorArtist": "Don Toliver",
+    "secondaryArtist": "Hurricane Wisdom",
+    "beatName": "Lost Souls",
+    "genre": "RnB",
+    "filenameTemplate": "Don Toliver Type Beat 2026 - Lost Souls",
+    "status": "posted"
+  },
+  {
+    "id": "plan_1781505927507_nvi5",
+    "date": "2026-06-17",
+    "anchorArtist": "Hurricane Wisdom",
+    "secondaryArtist": "Rnb",
+    "beatName": "Velvet",
+    "genre": "RnB",
+    "filenameTemplate": "Hurricane Wisdom Type Beat 2026 - Velvet",
+    "status": "posted"
+  },
+  {
+    "id": "plan_1781505927507_ys2e",
+    "date": "2026-06-18",
+    "anchorArtist": "Hurricane Wisdom",
+    "secondaryArtist": "Summrs",
+    "beatName": "Summer Breeze",
+    "genre": "melodic trap",
+    "filenameTemplate": "Hurricane Wisdom Type Beat 2026 - Summer Breeze",
+    "status": "posted"
+  },
+  {
+    "id": "plan_1781505927507_zrd4",
+    "date": "2026-06-19",
+    "anchorArtist": "Drake",
+    "secondaryArtist": "Hurricane Wisdom",
+    "beatName": "Turbulent",
+    "genre": "drill",
+    "filenameTemplate": "Drake Type Beat 2026 - Turbulent",
+    "status": "posted"
+  },
+  {
+    "id": "plan_1781505927507_evu2",
+    "date": "2026-06-20",
+    "anchorArtist": "Hurricane Wisdom",
+    "secondaryArtist": "Jaydes",
+    "beatName": "Echoes",
+    "genre": "pluggnb",
+    "filenameTemplate": "Hurricane Wisdom Type Beat 2026 - Echoes",
+    "status": "posted"
   }
 ]

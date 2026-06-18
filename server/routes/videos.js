@@ -65,7 +65,7 @@ router.get('/', async (req, res) => {
 
     } else {
       // Fall back to live OAuth call
-      const chData = await accountManager.withYouTube(async (auth) => {
+      const chData = await accountManager.withPrimaryYouTube(async (auth) => {
         const yt = google.youtube({ version: 'v3', auth })
         const { data } = await yt.channels.list({ part: ['id', 'contentDetails'], mine: true })
         const ch = data.items?.[0]
@@ -79,7 +79,7 @@ router.get('/', async (req, res) => {
     if (!uploadsPlaylist) return res.json({ data: [] })
 
     // Step 2: playlistItems + videos.list — use API keys (no OAuth required)
-    const result = await accountManager.withPublicYouTube(async (auth) => {
+    const result = await accountManager.withPublicYouTube(async ({ auth }) => {
       const youtube = google.youtube({ version: 'v3', auth })
 
       // 2a. Get video IDs from uploads playlist (1 quota unit)

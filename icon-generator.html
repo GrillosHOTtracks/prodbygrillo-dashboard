@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Icon Generator — prodbygrillo TikTok</title>
+  <style>
+    body { background: #0c0c0c; color: #c0c0c0; font-family: 'Courier New', monospace;
+           display: flex; flex-direction: column; align-items: center; justify-content: center;
+           min-height: 100vh; gap: 20px; margin: 0; }
+    canvas { border: 1px solid #333; }
+    button { background: #0a1a0a; color: #00ff00; border: 1px solid #1a3a1a;
+             padding: 10px 24px; font-family: 'Courier New', monospace; font-size: 13px;
+             letter-spacing: 1px; cursor: pointer; }
+    button:hover { background: #0f2a0f; }
+    p { color: #555; font-size: 11px; letter-spacing: 1px; }
+  </style>
+</head>
+<body>
+  <canvas id="c" width="1024" height="1024"></canvas>
+  <button onclick="download()">[ DOWNLOAD icon.png ]</button>
+  <p>1024 × 1024 px · pronto para o TikTok Developer Portal</p>
+  <script>
+    const c = document.getElementById('c')
+    const ctx = c.getContext('2d')
+    const W = 1024, H = 1024
+
+    // Background
+    ctx.fillStyle = '#0c0c0c'
+    ctx.fillRect(0, 0, W, H)
+
+    // Green border frame
+    ctx.strokeStyle = '#00cc00'
+    ctx.lineWidth = 8
+    ctx.strokeRect(40, 40, W - 80, H - 80)
+
+    // Corner accents
+    const accentLen = 60
+    ctx.strokeStyle = '#00ff00'
+    ctx.lineWidth = 4
+    ;[[40,40],[W-40,40],[40,H-40],[W-40,H-40]].forEach(([x,y]) => {
+      const sx = x === 40 ? 1 : -1
+      const sy = y === 40 ? 1 : -1
+      ctx.beginPath()
+      ctx.moveTo(x, y); ctx.lineTo(x + sx * accentLen, y)
+      ctx.moveTo(x, y); ctx.lineTo(x, y + sy * accentLen)
+      ctx.stroke()
+    })
+
+    // Main text: PG
+    ctx.fillStyle = '#00ff00'
+    ctx.font = 'bold 380px Courier New, monospace'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText('PG', W / 2, H / 2 - 40)
+
+    // Sub text
+    ctx.fillStyle = '#007700'
+    ctx.font = '52px Courier New, monospace'
+    ctx.letterSpacing = '8px'
+    ctx.fillText('PRODBYGRILLO', W / 2, H / 2 + 220)
+
+    // Scanline overlay
+    ctx.fillStyle = 'rgba(0,0,0,0.12)'
+    for (let y = 0; y < H; y += 3) {
+      ctx.fillRect(0, y, W, 1)
+    }
+
+    function download() {
+      const a = document.createElement('a')
+      a.download = 'prodbygrillo-icon.png'
+      a.href = c.toDataURL('image/png')
+      a.click()
+    }
+  </script>
+</body>
+</html>

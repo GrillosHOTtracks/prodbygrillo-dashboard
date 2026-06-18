@@ -14,10 +14,13 @@ const { isQuotaError }  = require('../apiError')
 const autoPlaylists     = require('../autoPlaylists')
 const autoReplies       = require('../autoReplies')
 const autoComments      = require('../autoComments')
+const tiktok            = require('../tiktokAuth')
+const tiktokUpload      = require('../tiktokUpload')
 
-const router   = express.Router()
-const TMP_DIR  = path.join(__dirname, '../tmp')
-const DATA_FILE = path.join(__dirname, '../data/uploads.json')
+const router        = express.Router()
+const TMP_DIR       = path.join(__dirname, '../tmp')
+const DATA_FILE     = path.join(__dirname, '../data/uploads.json')
+const SCHEDULE_FILE = path.join(__dirname, '../data/schedule.json')
 
 fs.mkdirSync(TMP_DIR,  { recursive: true })
 fs.mkdirSync(path.dirname(DATA_FILE), { recursive: true })
@@ -35,8 +38,27 @@ const upload = multer({
   },
 })
 
-function readHistory()     { try { return JSON.parse(fs.readFileSync(DATA_FILE, 'utf-8')) } catch { return [] } }
-function writeHistory(arr) { fs.writeFileSync(DATA_FILE, JSON.stringify(arr, null, 2)) }
+function readHistory()       { try { return JSON.parse(fs.readFileSync(DATA_FILE, 'utf-8')) } catch { return [] } }
+function writeHistory(arr)   { fs.writeFileSync(DATA_FILE, JSON.stringify(arr, null, 2)) }
+function readSchedule()      { try { return JSON.parse(fs.readFileSync(SCHEDULE_FILE, 'utf-8')) } catch { return [] } }
+function writeSchedule(arr)  { fs.writeFileSync(SCHEDULE_FILE, JSON.stringify(arr, null, 2)) }
+
+function autoMarkSchedulePosted(dateKey) {
+  try {
+    const sched   = readSchedule()
+    let   changed = false
+    const updated = sched.map(e => {
+      if (e.date === dateKey && e.status === 'planned') { changed = true; return { ...e, status: 'posted' } }
+      return e
+    })
+    if (changed) {
+      writeSchedule(updated)
+      console.log('[UPLOAD] Schedule entry auto-marked as posted for', dateKey)
+    }
+  } catch (err) {
+    console.warn('[UPLOAD] autoMarkSchedulePosted failed:', err.message)
+  }
+}
 
 // YouTube tag budget: each tag + 2 if multi-word (quotes) + 1 comma separator; total ≤ 500
 function sanitizeTags(raw) {
@@ -236,6 +258,10 @@ router.post('/video', upload.single('video'), async (req, res) => {
     })
     writeHistory(history)
 
+    // Auto-mark matching schedule plan as posted
+    const uploadDateKey = (isScheduled ? schedDate : new Date()).toISOString().slice(0, 10)
+    autoMarkSchedulePosted(uploadDateKey)
+
     const finalStatus = isScheduled ? 'SCHEDULED' : 'LIVE'
     send({ status: finalStatus, progress: 100, videoId, videoUrl: `https://youtu.be/${videoId}` })
 
@@ -243,12 +269,14 @@ router.post('/video', upload.single('video'), async (req, res) => {
     try {
       const groq = new Groq({ apiKey: process.env.GROQ_API_KEY })
       const videoTitle = meta.title || 'Type Beat'
-      const groqRes = await groq.chat.completions.create({
-        model: 'llama-3.3-70b-versatile',
-        max_tokens: 120,
-        messages: [{
-          role: 'user',
-          content: `You are prodbygrillo, a music producer. You just uploaded a YouTube beat video titled: "${videoTitle}"
+      // FIX #12 — 30s timeout so a slow/hung Groq response doesn't block the upload SSE stream
+      const groqRes = await Promise.race([
+        groq.chat.completions.create({
+          model: 'llama-3.3-70b-versatile',
+          max_tokens: 120,
+          messages: [{
+            role: 'user',
+            content: `You are prodbygrillo, a music producer. You just uploaded a YouTube beat video titled: "${videoTitle}"
 
 Write ONE short comment (1-2 lines) to post on your own video that:
 - Asks a question or calls for engagement specific to this beat's style/vibe
@@ -259,8 +287,10 @@ Write ONE short comment (1-2 lines) to post on your own video that:
 - 20-35 words total
 
 Reply with ONLY the comment text, nothing else.`,
-        }],
-      })
+          }],
+        }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Groq timeout after 30s')), 30000)),
+      ])
       const commentText = groqRes.choices[0]?.message?.content?.trim()
       if (commentText) {
         await yt.commentThreads.insert({
@@ -302,8 +332,11 @@ Reply with ONLY the comment text, nothing else.`,
         const shortTitle = (meta.title || 'Type Beat').replace(/#shorts/gi, '').trim() + ' #shorts'
         const shortDesc  = `${meta.title || 'Type Beat'}\n\n💰 https://www.beatstars.com/prodbygrillo\n\nprod. prodbygrillo\n\n#shorts`
 
-        // Short always goes live immediately — even when the main video is scheduled
-        const shortStatus_ = { privacyStatus: 'public', selfDeclaredMadeForKids: false }
+        const shortSchedDate = meta.scheduledAt ? new Date(meta.scheduledAt) : null
+        const shortIsScheduled = shortSchedDate && !isNaN(shortSchedDate) && shortSchedDate > new Date()
+        const shortStatus_ = shortIsScheduled
+          ? { privacyStatus: 'private', publishAt: shortSchedDate.toISOString(), selfDeclaredMadeForKids: false }
+          : { privacyStatus: 'public', selfDeclaredMadeForKids: false }
 
         const shortRes = await yt.videos.insert({
           part: ['snippet', 'status'],
@@ -321,12 +354,11 @@ Reply with ONLY the comment text, nothing else.`,
 
         const shortVideoId = shortRes.data.id
         console.log('[UPLOAD] SHORT_DONE shortVideoId:', shortVideoId)
-        // Save short to history
         const hist2 = readHistory()
         hist2.unshift({
           id: shortVideoId, title: shortTitle,
-          publishedAt: new Date().toISOString(),
-          status: 'live',
+          publishedAt: shortIsScheduled ? shortSchedDate.toISOString() : new Date().toISOString(),
+          status: shortIsScheduled ? 'scheduled' : 'live',
           thumbnailUrl: `https://i.ytimg.com/vi/${shortVideoId}/hqdefault.jpg`,
           videoUrl: `https://youtu.be/${shortVideoId}`, views: 0,
           uploadedAt: new Date().toISOString(),
@@ -335,6 +367,21 @@ Reply with ONLY the comment text, nothing else.`,
         writeHistory(hist2)
 
         send({ status: 'SHORT_DONE', shortVideoId, shortUrl: `https://youtu.be/${shortVideoId}` })
+
+        // ── TikTok auto-upload (same Short video, vertical 9:16)
+        if (meta.publishTikTok && tiktok.isAuthenticated()) {
+          try {
+            send({ status: 'TIKTOK_UPLOADING', progress: 0 })
+            const ttId = await tiktokUpload.uploadVideo(shortPath, (p) => {
+              send({ status: 'TIKTOK_UPLOADING', progress: p })
+            })
+            send({ status: 'TIKTOK_DONE', publishId: ttId })
+            console.log('[UPLOAD] TikTok inbox upload done, publish_id:', ttId)
+          } catch (ttErr) {
+            console.error('[UPLOAD] TikTok upload error:', ttErr.message)
+            send({ status: 'TIKTOK_ERROR', error: ttErr.message })
+          }
+        }
       } catch (shortErr) {
         console.error('[UPLOAD] Short error:', shortErr.message)
         if (shortErr.response?.data) console.error('[UPLOAD] Short API error:', JSON.stringify(shortErr.response.data))
