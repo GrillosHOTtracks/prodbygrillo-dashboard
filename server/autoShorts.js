@@ -95,7 +95,7 @@ function cutShort(inputPath, outputPath) {
   })
 }
 
-const FIXED_HOURS  = [0, 3, 6, 12, 18, 21]  // fixed posting times (local time)
+const FIXED_HOURS  = [0, 3, 6, 10, 12, 13, 16, 18, 19, 21, 23]  // fixed posting times (local time)
 const DAILY_LIMIT  = FIXED_HOURS.length
 
 // All eligible source videos (live, not a short themselves)
@@ -252,24 +252,29 @@ function start(mgr) {
   const schedule  = buildTodaySchedule()
   console.log(`[AUTO-SHORT] Started — ${DAILY_LIMIT}/day random hours | eligible: ${eligible.length} | cycle: ${usedCycle.length}/${eligible.length} | today: ${schedule.map(t => new Date(t).toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' })).join(', ')}`)
 
-  async function tick() {
-    const schedule    = buildTodaySchedule()
-    const now         = Date.now()
-    const todayCount  = shortsUploadedToday()
-    const slotsPassed = schedule.filter(t => t <= now).length
+  const SLOT_WINDOW_MS = 30 * 60 * 1000  // só publica se o slot foi há menos de 30 min
 
-    if (todayCount < slotsPassed) {
+  async function tick() {
+    const schedule   = buildTodaySchedule()
+    const now        = Date.now()
+    const todayCount = shortsUploadedToday()
+
+    // Slot "devido agora" = passou há menos de 30 minutos e ainda não foi coberto
+    const dueSlotsCount = schedule.filter(t => t <= now && t >= now - SLOT_WINDOW_MS).length
+    const alreadyDone   = schedule.filter(t => t <= now && t < now - SLOT_WINDOW_MS).length
+
+    if (todayCount < alreadyDone + dueSlotsCount && dueSlotsCount > 0) {
       await processNext()
     }
 
-    // Wake up right after the next slot, or in TICK_MS if all slots passed
+    // Wake up right after the next slot
     const next  = schedule.find(t => t > now)
     const delay = next ? Math.max(60000, next - now + 5000) : TICK_MS
-    nextRunAt   = now + delay
+    nextRunAt   = Date.now() + delay
     setTimeout(tick, delay)
   }
 
-  // First tick: start quickly so we don't miss a slot that's already passed today
+  // First tick: 1 minuto após arranque
   nextRunAt = Date.now() + 60000
   setTimeout(tick, 60000)
 }
